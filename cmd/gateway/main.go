@@ -13,6 +13,7 @@ import (
 
 	gateway "example.com/go-gateway-starter"
 	"example.com/go-gateway-starter/extensions/headers"
+	"example.com/go-gateway-starter/extensions/requesttag"
 )
 
 func main() {
@@ -23,15 +24,22 @@ func main() {
 		os.Exit(1)
 	}
 
-	app, err := gateway.New([]gateway.Route{
-		{
+	tag := requesttag.New("example", func(record requesttag.Record) {
+		slog.Info("request completed", "tag", record.Tag, "route", record.RoutePrefix,
+			"proxied", record.Proxied, "duration", record.Outcome.Duration,
+			"error", record.Outcome.Err, "aborted", record.Outcome.Aborted)
+	})
+	app, err := gateway.NewWithConfig(gateway.Config{
+		Routes: []gateway.Route{{
 			Prefix:   "/api/",
 			Upstream: upstream,
 			Middlewares: []gateway.Middleware{
 				headers.AddResponseHeader("X-Gateway", "starter"),
 			},
-		},
-	}, requestLogger)
+		}},
+		Middlewares: []gateway.Middleware{tag.Middleware, requestLogger},
+		Extensions:  []any{tag},
+	})
 	if err != nil {
 		slog.Error("gateway configuration failed", "error", err)
 		os.Exit(1)
