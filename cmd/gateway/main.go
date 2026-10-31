@@ -12,8 +12,8 @@ import (
 	"time"
 
 	gateway "example.com/go-gateway-starter"
+	"example.com/go-gateway-starter/extensions/accesslog"
 	"example.com/go-gateway-starter/extensions/headers"
-	"example.com/go-gateway-starter/extensions/requesttag"
 )
 
 func main() {
@@ -24,11 +24,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	tag := requesttag.New("example", func(record requesttag.Record) {
-		slog.Info("request completed", "tag", record.Tag, "route", record.RoutePrefix,
-			"proxied", record.Proxied, "duration", record.Outcome.Duration,
-			"error", record.Outcome.Err, "aborted", record.Outcome.Aborted)
-	})
+	access := accesslog.New(accesslog.Config{Report: func(record accesslog.Record) {
+		slog.Info("request completed", "request_id", record.RequestID, "trace_id", record.TraceID,
+			"method", record.Method, "path", record.Path, "route", record.RoutePrefix,
+			"upstream", record.Upstream, "upstream_status", record.UpstreamStatusCode,
+			"status", record.StatusCode, "bytes", record.BytesWritten, "result", record.Result,
+			"duration", record.Outcome.Duration, "error", record.Outcome.Err,
+			"response_error", record.ResponseError, "aborted", record.Outcome.Aborted,
+			"hijacked", record.Hijacked)
+	}})
 	app, err := gateway.NewWithConfig(gateway.Config{
 		Routes: []gateway.Route{{
 			Prefix:   "/api/",
@@ -37,8 +41,8 @@ func main() {
 				headers.AddResponseHeader("X-Gateway", "starter"),
 			},
 		}},
-		Middlewares: []gateway.Middleware{tag.Middleware, requestLogger},
-		Extensions:  []any{tag},
+		Middlewares: []gateway.Middleware{access.Middleware},
+		Extensions:  []any{access},
 	})
 	if err != nil {
 		slog.Error("gateway configuration failed", "error", err)
@@ -75,11 +79,4 @@ func env(name, fallback string) string {
 		return value
 	}
 	return fallback
-}
-
-func requestLogger(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		slog.Info("request", "method", r.Method, "path", r.URL.Path)
-		next.ServeHTTP(w, r)
-	})
 }

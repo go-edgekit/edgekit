@@ -1,0 +1,51 @@
+# Architecture Decision Records (ADRs)
+
+These ADRs separate framework choices from specific API-management features. ADRs 0003, 0004, 0005, and 0009 record the accepted architectural direction after the middleware/lifecycle and access-log experiments. Other ADRs remain proposed until explicitly reviewed and accepted.
+
+Acceptance does not freeze precise Go interfaces or mean every preferred extension point is implemented. The current APIs remain provisional, and implementation gaps are recorded in the relevant follow-up sections. See [the glossary](../../CONTEXT.md) for shared terms.
+
+## ADRs
+
+| ADR | Status | Decision | Main point |
+| --- | --- | --- | --- |
+| [0001](0001-framework-scope.md) | Proposed | Framework scope | Minimal, embeddable proxy core; business features live in extensions |
+| [0002](0002-use-go-standard-http-proxy.md) | Proposed | HTTP foundation | `net/http` and `httputil.ReverseProxy` rather than a custom networking stack |
+| [0003](0003-proxy-lifecycle-hooks.md) | Accepted | Lifecycle hooks | Small optional interfaces compiled into ordered hook lists at startup |
+| [0004](0004-compose-http-middleware-and-hooks.md) | Accepted | Middleware coexistence | Route middleware enters before route-matched hooks; completion surrounds the managed chain |
+| [0005](0005-per-request-gateway-context.md) | Accepted | Request context | Typed extension state, serial per-request access, and explicit context lifetimes |
+| [0006](0006-compile-time-go-extensions.md) | Proposed | Extension distribution | Compile-time Go packages before dynamic plugin systems |
+| [0007](0007-immutable-runtime-pipelines.md) | Proposed | Configuration lifecycle | Validate and compile immutable request pipelines at startup |
+| [0008](0008-separate-routing-from-upstream-selection.md) | Proposed | Upstream choice | Route matching is distinct from destination selection |
+| [0009](0009-outcomes-errors-and-early-responses.md) | Accepted | Outcome semantics | Core execution facts, middleware HTTP observations, extension interpretations; completion is not delivery |
+| [0010](0010-scaffold-hardening-and-verification.md) | Proposed | Verification | Test correctness/security boundaries, without claiming production readiness |
+
+## Decision process
+
+- **Proposed:** A candidate direction that can still change based on experiments.
+- **Accepted:** Architectural direction explicitly approved; Go APIs may remain provisional and some implementation work may be deferred.
+- **Superseded:** Replaced by a later ADR; link to its replacement.
+- **Rejected:** Considered but not adopted.
+
+Do not silently change the rationale of accepted ADRs. Write a new ADR to supersede a significant decision.
+
+## Remaining provisional APIs and deferred work
+
+1. Exact Go hook signatures, registration APIs, and optional function adapters (ADR-0003). The optional-interface model and startup compilation are accepted.
+2. Concrete rejection and structured failure-provenance types (ADR-0009). Execution facts, HTTP observations, and interpretations have distinct owners; completion does not guarantee delivery.
+3. State-key API details (ADR-0005). Private typed keys, serial per-request access, and entry-context completion semantics are accepted. Asynchronous middleware requires revisiting the lifecycle contract.
+4. Route-specific hook registration (ADR-0004). Route middleware entering before route-matched hooks, registration-order hook execution, and outer completion are accepted.
+5. Public outbound-request hooks and, when needed, a selector strategy (ADRs 0003 and 0008). These are not implemented merely because the boundaries are described.
+
+## Experiment findings and next validation
+
+The shared-context and access-log experiments demonstrate:
+
+- One gateway context accessible from global middleware, route middleware, and existing hooks.
+- Private typed state with isolation across concurrent requests.
+- Upstream response observation and completion after normal handling, early exits, and aborts.
+- Middleware-owned status/byte accounting and trace-correlation snapshots without expanding the core outcome API.
+- Optional response-writer instrumentation tested for flushing, informational responses, streaming failures, and connection upgrades.
+
+The access-log middleware changes an inbound request header that is forwarded upstream; it does not validate a hook on the actual rewritten outbound request. Dedicated route-matched and outbound-request hooks, structured failure provenance, and a public selector remain deferred.
+
+When those capabilities are needed, test that route middleware establishes state before route-matched hooks and that outbound hooks see the rewritten request before transport execution. Do not treat interface stabilization, live-span annotation, asynchronous middleware, or durable billing as established by the current experiments.
