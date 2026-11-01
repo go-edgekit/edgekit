@@ -58,6 +58,7 @@ go run ./cmd/gateway
 ├── extensions/
 │   ├── accesslog/               # HTTP accounting, trace correlation, completion records
 │   ├── bodylimit/               # Optional streaming request-body limits
+│   ├── egress/                  # Optional origin and IP-network allowlists
 │   ├── headers/headers.go       # Middleware-only extension
 │   ├── outboundsign/            # Signing the rewritten request using route state
 │   └── requesttag/requesttag.go # Middleware and lifecycle hooks sharing state
@@ -176,6 +177,7 @@ This is a focused hardening baseline, **not production readiness**. Ownership is
 | Framework | Standard `ReverseProxy` hop-by-hop handling; rebuild standard forwarding headers from the immediate peer; discard client `X-Real-IP`; preserve streaming, cancellation, and writer capabilities |
 | Embedding application | Supply a reusable `Config.Transport` for connection, TLS, response-header, and pool policy; configure the inbound `http.Server` |
 | Optional middleware | [Request-body limits](extensions/bodylimit/README.md), applied globally or per route without buffering |
+| Optional transport package | [Direct upstream origin/IP restrictions](extensions/egress/README.md), enabled only with explicit deployment allowlists |
 | Example executable | Explicit transport/server settings, an 8 MiB body limit on `/api/`, and a completion-log sink that omits raw paths and errors |
 
 ### Forwarding-header trust
@@ -197,9 +199,15 @@ Standard hop-by-hop headers and `Connection`-nominated headers are stripped in b
 
 These are source-level example settings, not new framework defaults or environment configuration. Response-header timing starts after the request body is written; it does not bound slow uploads, pool queue waits, or response-body duration. Idle timeouts do not limit active streams. Request contexts cancel dial/queue/transport work and streaming copies; a cancellation after response commitment can abort rather than replace the response. Completion still means handling ended, not successful delivery. Tests exercise timeout failures, connection reuse, streaming beyond the header budget, incremental uploads, and real client disconnects before and after response headers.
 
+### Optional destination restrictions
+
+[`extensions/egress`](extensions/egress/README.md) uses `Config.Transport` to enforce explicit allowed HTTP(S) origins and IP networks. It validates every DNS answer before dialing validated IP literals, while preserving HTTP/TLS identities and connection reuse. It owns a clean transport so ambient proxies and template dial/protocol callbacks cannot bypass these checks. This package is opt-in; the demo does not infer permitted deployment networks or enable it automatically. No core lifecycle API or default destination policy changes.
+
 ### Remaining risks
 
-- **Destination restrictions:** startup validation only requires an HTTP(S) URL with a host. There is no destination allowlist, resolved-IP validation, DNS-rebinding defense, or restriction on loopback, private, link-local, metadata-service, or credential-bearing URLs. Static configuration is trusted, not an SSRF defense. A deployment needs egress controls and, where required, validation at resolution/connection time. Compiled-in extensions and custom transports are trusted code, not sandboxed.
+The [follow-up plan](docs/investigations/proxy-risk-follow-ups.md) records five focused passes, ownership, verification, and deferred work.
+
+- **Destination restrictions:** default framework validation still only requires an HTTP(S) URL with a host. Without the optional egress transport there is no origin/IP allowlist or connection-time validation. With it, deployments must still choose narrow origin/network lists, apply network-level egress controls, and handle connection retirement and network translation. Static configuration is trusted, not a complete SSRF defense. Compiled-in extensions, callbacks, and custom transports are trusted code, not sandboxed.
 - **Sensitive data:** generic framework failures hide error details from clients, but `HTTPError.Message` is explicitly public. `Outcome.Err`, access-log records, extension callbacks, and standard `ReverseProxy` streaming/upgrade diagnostics can still contain sensitive data. The example omits raw request paths/errors and raw configured upstream URLs from its own request/startup logs; this is not a complete logging/redaction policy. Audit other sinks, route labels, origin names, and extension-provided fields before deployment.
 - **Resource and operational limits:** slow request/response bodies, idle active streams, aggregate concurrency, pool queues, response/header sizes, decompression, TLS termination, graceful termination of long-lived streams/upgrades, and load behavior still need application-specific review. Body limits are streaming read limits, not all-or-nothing upload validation. Keep Go patched; using the standard proxy does not remove protocol/security maintenance.
 
