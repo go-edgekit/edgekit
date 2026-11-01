@@ -8,6 +8,7 @@
 // Configure operational settings once before constructing the owned transport.
 template := http.DefaultTransport.(*http.Transport).Clone()
 template.ResponseHeaderTimeout = 10 * time.Second
+template.MaxResponseHeaderBytes = 64 << 10
 template.MaxIdleConns = 100
 template.MaxIdleConnsPerHost = 16
 template.MaxConnsPerHost = 64

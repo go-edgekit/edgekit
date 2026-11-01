@@ -31,7 +31,9 @@ Continue auditing deployment sinks, including `ReverseProxy` and `http.Server` d
 
 **Owner:** Executable, serving edge, and optional synchronous middleware.
 
-Set workload-specific inbound-header and upstream-response-header limits. Bound concurrent requests and queued work; connection counts do not bound HTTP/2 streams. Apply slow-upload and slow-reader policies per workload, preferably at the serving edge. Preserve legitimate long-lived streams; do not introduce blanket response deadlines, `http.TimeoutHandler`, or asynchronous middleware. Verify cancellation while queued and under saturation.
+**Initial implementation:** The [resource-limit assessment](resource-limits.md) records explicit 64 KiB example inbound/upstream header budgets and optional fail-fast admission, enabled in the example for 64 downstream calls with no waiting queue. Tests cover HTTP/2 stream concurrency, uploads, saturation, cancellation during pool acquisition, and unchanged completion behavior. Slow-body enforcement remains deployment-owned.
+
+Continue selecting workload-specific inbound-header and upstream-response-header limits. Bound concurrent requests and queued work; connection counts do not bound HTTP/2 streams. Apply slow-upload and slow-reader policies per workload, preferably at the serving edge. Preserve legitimate long-lived streams; do not introduce blanket response deadlines, `http.TimeoutHandler`, or asynchronous middleware. Verify cancellation while queued and under saturation.
 
 ## 4. Oversized upload semantics
 

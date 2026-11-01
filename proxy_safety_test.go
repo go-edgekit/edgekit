@@ -15,6 +15,7 @@ import (
 	"time"
 
 	gateway "example.com/go-gateway-starter"
+	"example.com/go-gateway-starter/extensions/admission"
 	"example.com/go-gateway-starter/extensions/bodylimit"
 )
 
@@ -380,7 +381,10 @@ func TestRequestBodyStreamsBeforeClientEOF(t *testing.T) {
 	defer upstream.Close()
 	route := testRoute(t, upstream.URL)
 	route.Middlewares = []gateway.Middleware{bodylimit.New(6)}
-	app, err := gateway.NewWithConfig(gateway.Config{Routes: []gateway.Route{route}, Transport: safetyTransport(t)})
+	app, err := gateway.NewWithConfig(gateway.Config{
+		Routes: []gateway.Route{route}, Transport: safetyTransport(t),
+		Middlewares: []gateway.Middleware{admission.New(1)},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,6 +411,18 @@ func TestRequestBodyStreamsBeforeClientEOF(t *testing.T) {
 	}
 	if got := waitSafety(t, first); got != "abc" {
 		t.Fatalf("upstream first bytes = %q", got)
+	}
+	// The upload remains incremental and holds its slot while waiting for more
+	// client bytes. Admission must not buffer it or release the slot early.
+	client := &http.Client{Timeout: 5 * time.Second}
+	response, err := client.Get(server.URL + "/api/overflow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, readErr := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != 503 || readErr != nil || string(body) != "Service Unavailable\n" {
+		t.Fatalf("slow upload lost admission slot: status=%d body=%q err=%v", response.StatusCode, body, readErr)
 	}
 	if _, err := io.WriteString(writer, "def"); err != nil {
 		t.Fatal(err)

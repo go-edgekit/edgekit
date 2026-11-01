@@ -57,6 +57,7 @@ go run ./cmd/gateway
 │   └── upstream/main.go          # Local demo backend
 ├── extensions/
 │   ├── accesslog/               # HTTP accounting, trace correlation, completion records
+│   ├── admission/               # Optional fail-fast downstream concurrency limit
 │   ├── bodylimit/               # Optional streaming request-body limits
 │   ├── egress/                  # Optional origin and IP-network allowlists
 │   ├── headers/headers.go       # Middleware-only extension
@@ -178,9 +179,9 @@ This is a focused hardening baseline, **not production readiness**. Ownership is
 | --- | --- |
 | Framework | Standard `ReverseProxy` hop-by-hop handling; rebuild standard forwarding headers from the immediate peer; discard client `X-Real-IP`; preserve streaming, cancellation, and writer capabilities |
 | Embedding application | Supply a reusable `Config.Transport` for connection, TLS, response-header, and pool policy; configure the inbound `http.Server` |
-| Optional middleware | [Request-body limits](extensions/bodylimit/README.md), applied globally or per route without buffering |
+| Optional middleware | [Request-body limits](extensions/bodylimit/README.md) and [fail-fast admission](extensions/admission/README.md), applied globally or per route without buffering |
 | Optional transport package | [Direct upstream origin/IP restrictions](extensions/egress/README.md), enabled only with explicit deployment allowlists |
-| Example executable | Explicit transport/server settings, an 8 MiB body limit on `/api/`, source-only diagnostics, and allowlisted completion-log fields |
+| Example executable | Explicit transport/server/header settings, an 8 MiB body limit on `/api/`, 64 active downstream calls with no admission queue, source-only diagnostics, and allowlisted completion-log fields |
 
 ### Forwarding-header trust
 
@@ -198,8 +199,17 @@ Standard hop-by-hop headers and `Connection`-nominated headers are stripped in b
 - Response-header timeout: 10s; expect-continue timeout: 1s.
 - Idle-connection timeout: 90s; maximum idle connections: 100 overall / 16 per host; maximum connections per host: 64.
 - Inbound header-read timeout: 5s; inbound idle timeout: 60s. No blanket `ReadTimeout`, `WriteTimeout`, or total request deadline.
+- Native inbound request-header and upstream response-header budgets: 64 KiB each. These use Go's parser/protocol semantics, not an exact universal wire-byte ceiling.
 
 These are source-level example settings, not new framework defaults or environment configuration. Response-header timing starts after the request body is written; it does not bound slow uploads, pool queue waits, or response-body duration. Idle timeouts do not limit active streams. Request contexts cancel dial/queue/transport work and streaming copies; a cancellation after response commitment can abort rather than replace the response. Completion still means handling ended, not successful delivery. Tests exercise timeout failures, connection reuse, streaming beyond the header budget, incremental uploads, and real client disconnects before and after response headers.
+
+### Admission and resource limits
+
+[`extensions/admission`](extensions/admission/README.md) bounds concurrent calls to downstream handlers with no waiting queue. The example registers one shared 64-call budget after access-log middleware. Saturation receives a generic local 503 before request hooks/routing; completion and HTTP accounting still run, without inventing an upstream error. Slots remain occupied during uploads, response streaming, and transport-pool waits until downstream returns or unwinds, including after cancellation/panics. Request and writer capabilities are unchanged.
+
+This counts HTTP/2 streams independently of connection-pool limits. It is not a request-rate policy or a cap on every process goroutine/socket: outer middleware, completion reporters, rejection writes, pre-handler work, and server cleanup remain outside the budget. Stalled or healthy long-lived streams can occupy every slot. Inbound header rejection occurs before gateway entry and therefore has no gateway completion event. Upstream header-parse failures use the existing generic 502 path.
+
+Slow-upload, slow-reader, accepted-connection, and workload-isolation policies remain deployment-owned. No blanket stream-duration or body-idle deadlines were added. See [the resource-limit assessment](docs/investigations/resource-limits.md) for established protections, tests, and the remaining slow-body decisions.
 
 ### Optional destination restrictions
 
@@ -217,7 +227,7 @@ The [follow-up plan](docs/investigations/proxy-risk-follow-ups.md) records five 
 
 - **Destination restrictions:** default framework validation still only requires an HTTP(S) URL with a host. Without the optional egress transport there is no origin/IP allowlist or connection-time validation. With it, deployments must still choose narrow origin/network lists, apply network-level egress controls, and handle connection retirement and network translation. Static configuration is trusted, not a complete SSRF defense. Compiled-in extensions, callbacks, and custom transports are trusted code, not sandboxed.
 - **Sensitive data:** generic framework failures hide error details from clients, but `HTTPError.Message` is explicitly public. `Outcome.Err`, access-log records, constructor errors, extension callbacks, and panic values remain sensitive internally. Custom sinks, application-created servers/loggers, runtime crash output, and debug facilities need deployment review. Source-only proxy diagnostics and the example process log policy do not make arbitrary records safe to serialize or provide a complete redaction policy.
-- **Resource and operational limits:** slow request/response bodies, idle active streams, aggregate concurrency, pool queues, response/header sizes, decompression, TLS termination, graceful termination of long-lived streams/upgrades, and load behavior still need application-specific review. Body limits are streaming read limits, not all-or-nothing upload validation. Keep Go patched; using the standard proxy does not remove protocol/security maintenance.
+- **Resource and operational limits:** admission bounds downstream calls, not slow rejection writes, server body draining, completion reporters, or accepted sockets. Slow request/response bodies, idle active streams, aggregate resource usage, workload isolation, decompression, TLS termination, graceful termination of long-lived streams/upgrades, and load behavior still need application-specific review. Header budgets use native Go semantics; body limits are streaming read limits, not all-or-nothing upload validation. Keep Go patched; using the standard proxy does not remove protocol/security maintenance.
 
 ## Boundaries to revisit later
 

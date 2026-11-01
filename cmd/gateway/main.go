@@ -14,6 +14,7 @@ import (
 
 	gateway "example.com/go-gateway-starter"
 	"example.com/go-gateway-starter/extensions/accesslog"
+	"example.com/go-gateway-starter/extensions/admission"
 	"example.com/go-gateway-starter/extensions/bodylimit"
 	"example.com/go-gateway-starter/extensions/headers"
 	"example.com/go-gateway-starter/internal/safelog"
@@ -40,7 +41,7 @@ func main() {
 				headers.AddResponseHeader("X-Gateway", "starter"),
 			},
 		}},
-		Middlewares: []gateway.Middleware{access.Middleware},
+		Middlewares: []gateway.Middleware{access.Middleware, admission.New(64)},
 		Extensions:  []any{access},
 		Transport:   transport,
 	})
@@ -75,6 +76,7 @@ func newHTTPServer(handler http.Handler) *http.Server {
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    64 << 10,
 		ErrorLog:          safelog.New("http_server"),
 	}
 }
@@ -88,6 +90,7 @@ func newUpstreamTransport() *http.Transport {
 	}).DialContext
 	transport.TLSHandshakeTimeout = 5 * time.Second
 	transport.ResponseHeaderTimeout = 10 * time.Second
+	transport.MaxResponseHeaderBytes = 64 << 10
 	transport.ExpectContinueTimeout = time.Second
 	transport.IdleConnTimeout = 90 * time.Second
 	transport.MaxIdleConns = 100

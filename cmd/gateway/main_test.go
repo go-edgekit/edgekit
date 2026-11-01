@@ -29,7 +29,7 @@ func TestUpstreamTransportPolicy(t *testing.T) {
 	defer transport.CloseIdleConnections()
 	if transport.Proxy != nil || transport.DialContext == nil ||
 		transport.TLSHandshakeTimeout != 5*time.Second || transport.ResponseHeaderTimeout != 10*time.Second ||
-		transport.ExpectContinueTimeout != time.Second || transport.IdleConnTimeout != 90*time.Second ||
+		transport.ExpectContinueTimeout != time.Second || transport.IdleConnTimeout != 90*time.Second || transport.MaxResponseHeaderBytes != 64<<10 ||
 		transport.MaxIdleConns != 100 || transport.MaxIdleConnsPerHost != 16 || transport.MaxConnsPerHost != 64 ||
 		transport.DisableKeepAlives || !transport.ForceAttemptHTTP2 {
 		t.Fatalf("unexpected example transport policy: %+v", transport)
@@ -238,7 +238,7 @@ func TestServerDiagnosticsDoNotChangeCompletionOrEchoDetails(t *testing.T) {
 			}
 			server := httptest.NewUnstartedServer(app)
 			server.Config = newHTTPServer(app)
-			if server.Config.ErrorLog == nil || server.Config.ReadHeaderTimeout != 5*time.Second || server.Config.IdleTimeout != 60*time.Second || server.Config.WriteTimeout != 0 || server.Config.ReadTimeout != 0 {
+			if server.Config.ErrorLog == nil || server.Config.ReadHeaderTimeout != 5*time.Second || server.Config.IdleTimeout != 60*time.Second || server.Config.MaxHeaderBytes != 64<<10 || server.Config.WriteTimeout != 0 || server.Config.ReadTimeout != 0 {
 				t.Fatal("server diagnostics changed timeout policy or were not installed")
 			}
 			server.Start()
