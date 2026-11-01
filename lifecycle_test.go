@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 
 type testExtension struct {
 	request  func(context.Context, *gateway.RequestContext, *http.Request) error
+	outbound func(context.Context, *gateway.RequestContext, *http.Request) error
 	response func(context.Context, *gateway.RequestContext, *http.Response) error
 	complete func(context.Context, *gateway.RequestContext, gateway.Outcome)
 }
@@ -27,6 +29,13 @@ type testExtension struct {
 func (e *testExtension) OnRequest(ctx context.Context, rc *gateway.RequestContext, r *http.Request) error {
 	if e.request != nil {
 		return e.request(ctx, rc, r)
+	}
+	return nil
+}
+
+func (e *testExtension) OnBeforeUpstream(ctx context.Context, rc *gateway.RequestContext, r *http.Request) error {
+	if e.outbound != nil {
+		return e.outbound(ctx, rc, r)
 	}
 	return nil
 }
@@ -86,6 +95,24 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 			steps = append(steps, "request:first")
 			return nil
 		},
+		outbound: func(ctx context.Context, rc *gateway.RequestContext, r *http.Request) error {
+			check(ctx, rc)
+			if ctx.Value(contextKey{}) != "derived" || r.Context() != ctx {
+				t.Fatal("outbound hook lost the execution context")
+			}
+			if value, _ := gateway.GetState(rc, key); value != "route entered" {
+				t.Fatal("outbound hook ran before route middleware established state")
+			}
+			if prefix, ok := rc.RoutePrefix(); !ok || prefix != "/api/" {
+				t.Fatal("outbound hook has no matched route")
+			}
+			if target, ok := rc.Upstream(); !ok || target.String() != upstream.URL || r.URL.Host != target.Host {
+				t.Fatal("outbound hook did not receive the rewritten request")
+			}
+			r.Header.Set("X-Outbound", "first")
+			steps = append(steps, "outbound:first")
+			return nil
+		},
 		response: func(ctx context.Context, rc *gateway.RequestContext, response *http.Response) error {
 			check(ctx, rc)
 			if ctx.Value(contextKey{}) != "derived" {
@@ -125,6 +152,13 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 			steps = append(steps, "request:second")
 			return nil
 		},
+		outbound: func(_ context.Context, _ *gateway.RequestContext, r *http.Request) error {
+			if r.Header.Get("X-Outbound") != "first" {
+				t.Fatal("outbound hooks ran out of order")
+			}
+			steps = append(steps, "outbound:second")
+			return nil
+		},
 		response: func(_ context.Context, _ *gateway.RequestContext, response *http.Response) error {
 			if response.Header.Get("X-Upstream") != "modified" {
 				t.Fatal("response hooks ran out of order")
@@ -160,6 +194,7 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 			if _, ok := rc.Upstream(); ok {
 				t.Fatal("proxy began before route middleware")
 			}
+			gateway.SetState(rc, key, "route entered")
 			steps = append(steps, "route:before")
 			next.ServeHTTP(w, r)
 			steps = append(steps, "route:after")
@@ -176,7 +211,7 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 	if w.Code != 200 || w.Header().Get("X-Upstream") != "modified" || w.Body.String() != "body" {
 		t.Fatalf("unexpected response: %d %v %q", w.Code, w.Header(), w.Body.String())
 	}
-	want := []string{"global:before", "request:first", "request:second", "route:before", "response:first", "response:second", "route:after", "global:after", "complete:first", "complete:second"}
+	want := []string{"global:before", "request:first", "request:second", "route:before", "outbound:first", "outbound:second", "response:first", "response:second", "route:after", "global:after", "complete:first", "complete:second"}
 	if !reflect.DeepEqual(steps, want) {
 		t.Fatalf("order = %v, want %v", steps, want)
 	}
@@ -214,6 +249,10 @@ func TestCompletionOnEarlyExits(t *testing.T) {
 					if tc.hookDeny {
 						return fmt.Errorf("policy: %w", denial)
 					}
+					return nil
+				},
+				outbound: func(context.Context, *gateway.RequestContext, *http.Request) error {
+					t.Fatal("outbound hook ran for a local response")
 					return nil
 				},
 				response: func(context.Context, *gateway.RequestContext, *http.Response) error {
@@ -268,7 +307,7 @@ func TestCompletionOnEarlyExits(t *testing.T) {
 }
 
 func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
-	for _, phase := range []string{"request", "response"} {
+	for _, phase := range []string{"request", "outbound", "response"} {
 		for _, tc := range []struct {
 			name    string
 			err     error
@@ -280,7 +319,9 @@ func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
 			{name: "invalid rejection", err: &gateway.HTTPError{StatusCode: 200, Message: "secret details"}, status: 500, message: "Internal Server Error\n"},
 		} {
 			t.Run(phase+"/"+tc.name, func(t *testing.T) {
+				var received atomic.Int32
 				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					received.Add(1)
 					w.Header().Set("X-Upstream", "must-not-escape")
 					_, _ = io.WriteString(w, "upstream body")
 				}))
@@ -290,6 +331,16 @@ func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
 					first.request = func(context.Context, *gateway.RequestContext, *http.Request) error { return tc.err }
 					second.request = func(context.Context, *gateway.RequestContext, *http.Request) error {
 						t.Fatal("later request hook ran after error")
+						return nil
+					}
+				} else if phase == "outbound" {
+					first.outbound = func(context.Context, *gateway.RequestContext, *http.Request) error { return tc.err }
+					second.outbound = func(context.Context, *gateway.RequestContext, *http.Request) error {
+						t.Fatal("later outbound hook ran after error")
+						return nil
+					}
+					second.response = func(context.Context, *gateway.RequestContext, *http.Response) error {
+						t.Fatal("response hook ran after outbound failure")
 						return nil
 					}
 				} else {
@@ -317,13 +368,20 @@ func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
 				status, message := tc.status, tc.message
 				if status == 0 {
 					status = 500
-					if phase == "response" {
+					if phase != "request" {
 						status = 502
 					}
 					message = http.StatusText(status) + "\n"
 				}
 				if !completed || w.Code != status || w.Body.String() != message || w.Header().Get("X-Upstream") != "" {
 					t.Fatalf("unexpected response: %d %v %q, completed=%v", w.Code, w.Header(), w.Body.String(), completed)
+				}
+				wantReceived := int32(0)
+				if phase == "response" {
+					wantReceived = 1
+				}
+				if got := received.Load(); got != wantReceived {
+					t.Fatalf("upstream received %d requests, want %d", got, wantReceived)
 				}
 			})
 		}
@@ -548,6 +606,51 @@ func TestCancellationReachesHooks(t *testing.T) {
 	app.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/x", nil).WithContext(ctx))
 	if !completed {
 		t.Fatal("completion did not run for canceled context")
+	}
+}
+
+func TestCompletionOnOutboundPanic(t *testing.T) {
+	unwound := false
+	completions := 0
+	extension := &testExtension{
+		outbound: func(context.Context, *gateway.RequestContext, *http.Request) error {
+			panic("signing panic")
+		},
+		response: func(context.Context, *gateway.RequestContext, *http.Response) error {
+			t.Fatal("response hook ran after outbound panic")
+			return nil
+		},
+		complete: func(_ context.Context, rc *gateway.RequestContext, outcome gateway.Outcome) {
+			completions++
+			if !unwound || !outcome.Aborted || outcome.Err != nil {
+				t.Fatalf("unexpected panic outcome: unwound=%v outcome=%+v", unwound, outcome)
+			}
+			if _, ok := rc.Upstream(); !ok {
+				t.Fatal("upstream was not selected before outbound panic")
+			}
+		},
+	}
+	route := testRoute(t, "http://unused.invalid")
+	route.Middlewares = []gateway.Middleware{func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() { unwound = true }()
+			next.ServeHTTP(w, r)
+		})
+	}}
+	app, err := gateway.NewWithConfig(gateway.Config{Routes: []gateway.Route{route}, Extensions: []any{extension}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	func() {
+		defer func() {
+			if recovered := recover(); recovered != "signing panic" {
+				t.Fatalf("panic changed or was swallowed: %v", recovered)
+			}
+		}()
+		app.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/x", nil))
+	}()
+	if completions != 1 {
+		t.Fatalf("completion calls=%d, want 1", completions)
 	}
 }
 

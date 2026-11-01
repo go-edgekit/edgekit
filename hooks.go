@@ -15,6 +15,21 @@ type RequestHook interface {
 	OnRequest(context.Context, *RequestContext, *http.Request) error
 }
 
+// BeforeUpstreamHook runs after route middleware, upstream selection, and
+// request rewriting, immediately before the proxy delegates to its transport.
+// Hooks may inspect the outbound request and modify its headers. Destination
+// selection remains gateway-owned. Hooks must not consume or replace Body,
+// change the request context, or retain the request after returning.
+// An error skips later outbound hooks and transport execution, closes the
+// outbound body, and enters proxy error handling. This hook runs once per proxy
+// round trip, not once per connection attempt or transport-internal retry.
+// Signing hooks must run after other hooks that modify the signed fields.
+// The transport may still add protocol headers and choose wire framing.
+// This interface is experimental.
+type BeforeUpstreamHook interface {
+	OnBeforeUpstream(context.Context, *RequestContext, *http.Request) error
+}
+
 // UpstreamResponseHook inspects or modifies the upstream response before its
 // final headers are forwarded. It does not run for local responses or forwarded
 // informational (1xx) responses, except protocol upgrades (101).
@@ -57,6 +72,7 @@ func (e *HTTPError) Error() string { return e.Message }
 
 type hooks struct {
 	requests    []RequestHook
+	outbound    []BeforeUpstreamHook
 	responses   []UpstreamResponseHook
 	completions []CompletionHook
 }
@@ -70,6 +86,10 @@ func collectHooks(extensions []any) (hooks, error) {
 		found := false
 		if hook, ok := extension.(RequestHook); ok {
 			result.requests = append(result.requests, hook)
+			found = true
+		}
+		if hook, ok := extension.(BeforeUpstreamHook); ok {
+			result.outbound = append(result.outbound, hook)
 			found = true
 		}
 		if hook, ok := extension.(UpstreamResponseHook); ok {

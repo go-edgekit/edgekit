@@ -14,8 +14,8 @@ import (
 )
 
 // Result classifies the observations available to this extension. Proxy errors
-// include transport and response-hook errors; they do not identify an exact
-// failure phase or prove that a request reached the upstream.
+// include outbound-hook, transport, and response-hook errors. They do not identify
+// an exact failure phase or prove that a request reached the upstream.
 type Result string
 
 const (

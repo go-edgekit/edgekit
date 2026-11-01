@@ -7,8 +7,8 @@ A deliberately minimal, extensible API gateway in Go. It uses `net/http`, `httpu
 - Forwards all `/api/` requests to a configurable HTTP upstream, keeping the original path and query.
 - Supports global and per-route middleware using `func(http.Handler) http.Handler`.
 - Creates shared request context before registered middleware runs.
-- Supports optional request, upstream-response, and completion hooks.
-- Includes middleware-only (`extensions/headers`), shared-state (`extensions/requesttag`), and access-log (`extensions/accesslog`) examples.
+- Supports optional request, outbound-request, upstream-response, and completion hooks.
+- Includes middleware-only (`extensions/headers`), shared-state (`extensions/requesttag`), access-log (`extensions/accesslog`), and outbound-signing (`extensions/outboundsign`) examples.
 - Validates route configuration and shuts down gracefully.
 - Includes integration tests with a local `httptest` upstream.
 
@@ -58,10 +58,13 @@ go run ./cmd/gateway
 ├── extensions/
 │   ├── accesslog/               # HTTP accounting, trace correlation, completion records
 │   ├── headers/headers.go       # Middleware-only extension
+│   ├── outboundsign/            # Signing the rewritten request using route state
 │   └── requesttag/requesttag.go # Middleware and lifecycle hooks sharing state
 ├── gateway.go                   # Routes, gateway constructor, proxy
 ├── middleware.go                # Middleware type and Chain()
 ├── hooks.go                     # Optional hook interfaces and outcomes
+├── outbound.go                  # Fallible hook boundary before transport execution
+├── outbound_test.go             # Request isolation and body ownership tests
 ├── request_context.go           # Gateway metadata and typed extension state
 ├── gateway_test.go              # Proxy and middleware tests
 ├── lifecycle_test.go            # Context, hooks, early exits, and failure tests
@@ -95,7 +98,7 @@ app, err := gateway.NewWithConfig(gateway.Config{
 ```
 
 Here `accesslog` is `example.com/go-gateway-starter/extensions/accesslog`. The demo uses it as the main lifecycle extension. `extensions/requesttag` remains a standalone shared-state example, but is not registered by the demo.
-Middleware and hook registration are explicit and independent. Each extension implements only the interfaces it needs: `RequestHook`, `UpstreamResponseHook`, or `CompletionHook`. Extensions are shared across concurrent requests, so instance fields and completion callbacks must be concurrency-safe. Nil extensions and extensions implementing no hooks are rejected at startup.
+Middleware and hook registration are explicit and independent. Each extension implements only the interfaces it needs: `RequestHook`, `BeforeUpstreamHook`, `UpstreamResponseHook`, or `CompletionHook`. Extensions are shared across concurrent requests, so instance fields and completion callbacks must be concurrency-safe. Nil extensions and extensions implementing no hooks are rejected at startup.
 
 ### Execution and errors
 
@@ -107,6 +110,7 @@ Create RequestContext and attach it to the standard context
       Record route metadata
       Route middleware: before
         Select configured upstream and rewrite request
+        BeforeUpstream hooks on the rewritten outbound request
         Proxy request
         Upstream response hooks
         Stream response
@@ -115,7 +119,7 @@ Create RequestContext and attach it to the standard context
 Completion hooks
 ```
 
-Hooks run in registration order, including completion hooks. A request or response hook error stops that phase. Return `&gateway.HTTPError{StatusCode: 403, Message: "denied"}` for a controlled rejection. Other request-hook errors produce a generic 500; proxy and upstream-response-hook errors produce a generic 502. Error details remain in `Outcome.Err`, not the response. Normal upstream HTTP error statuses are forwarded and are not Go errors.
+Hooks run in registration order, including completion hooks. A request, outbound, or response hook error stops that phase. Return `&gateway.HTTPError{StatusCode: 403, Message: "denied"}` for a controlled rejection. Other request-hook errors produce a generic 500; outbound-hook, proxy, and upstream-response-hook errors produce a generic 502. Error details remain in `Outcome.Err`, not the response. Normal upstream HTTP error statuses are forwarded and are not Go errors.
 
 Completion runs once per gateway invocation after the middleware chain unwinds, even if middleware rejects, routing misses or redirects, or handling panics. Registered middleware must call `next` synchronously and at most once. Middleware that returns while downstream work continues (such as `http.TimeoutHandler`) is outside this experiment's lifecycle contract. Completion hooks must not panic or write a response. They receive the gateway entry context, which may already be canceled, rather than contexts derived inside middleware. Panics, including streaming aborts, continue to propagate.
 
@@ -154,12 +158,20 @@ Trace correlation is optional: provide `accesslog.Config.TraceID` and register t
 
 See [the access-log experiment](extensions/accesslog/README.md) for registration, middleware order, classification limits, and findings. Tests cover partial writes, streaming aborts, flushing, informational responses, protocol upgrades, and concurrent request isolation. HTTP accounting remains extension-owned; the gateway's `Outcome` is unchanged.
 
+## Outbound-signing experiment
+
+`extensions/outboundsign` uses route middleware to install a private signing key and a `BeforeUpstreamHook` to sign the rewritten request's method, destination, effective Host, and escaped URI. A private transport wrapper provides the fallible boundary after `ReverseProxy.Rewrite`. On a hook error, it closes the outbound body and skips later outbound hooks and transport execution; completion still runs after middleware unwinds.
+
+The integration tests verify signatures at a local upstream, including upstream base-path and query rewriting, client-signature replacement, unchanged request bodies, signing failures, cancellation, and concurrent routes with different keys. No route-matched hook was needed. The demo executable does not enable signing.
+
+See [the outbound-signing experiment](extensions/outboundsign/README.md) for registration and limits. This is not a production authentication protocol: bodies are not signed and replay protection is absent. The hook API remains experimental.
+
 ## Boundaries to revisit later
 
 - Inbound middleware wraps `http.Handler` and can reject requests before proxying.
-- Upstream request rewriting belongs in the reverse proxy's `Rewrite` hook.
+- Gateway-owned upstream URL rewriting belongs in the reverse proxy's `Rewrite` hook. Fallible outbound-header customization runs afterward through `BeforeUpstreamHook`.
 - Upstream response hooks use `ReverseProxy.ModifyResponse`; local responses do not run them. Forwarded informational responses are outside this hook, except protocol upgrades (101).
-- Outbound request hooks and replaceable upstream selection remain deferred. Fallible outbound hooks would need more than `Rewrite`, which cannot return errors.
+- Outbound hooks run once per proxy round trip, not per transport-internal retry or connection attempt. Register signing after hooks that modify signed fields; the transport may still add protocol headers and choose wire framing. Hooks must preserve context and body ownership. Replaceable upstream selection remains deferred.
 - Route-specific hooks, live-span annotation, exact proxy-error phases, asynchronous middleware, and response-body transformations need concrete use cases before expanding the public API.
 - Production use will require additional configuration management, security review, TLS, request size limits, appropriate timeouts, reliable telemetry, and more thorough HTTP behavior tests.
 

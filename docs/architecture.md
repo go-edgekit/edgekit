@@ -3,6 +3,8 @@
 **Status:** Initial design exploration
 **Version:** 0.1
 
+This document records the initial exploration. See the [ADRs](adr/README.md) for current decisions and implementation gaps, and the [gateway survey assessment](investigations/high-over-findings.md) for findings compared with those decisions. The assessment does not expand the scaffold scope or change ADR statuses.
+
 ## 1. Vision
 
 Build a lightweight, extensible API gateway framework written in Go.

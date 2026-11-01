@@ -44,6 +44,8 @@ Keep successful local responses in HTTP middleware for now. The concrete typed-r
 
 ## Validation / follow-up
 
-The current implementation exposes request, upstream-response, and completion hooks, compiled at startup. The access-log experiment exercises middleware state, response hooks, and completion without expanding the core API. Route-matched hooks, outbound-request hooks, and structured failure provenance remain follow-up work, not existing capabilities.
+The current implementation exposes request, outbound-request, upstream-response, and completion hooks, compiled at startup. The access-log experiment exercises middleware state, response hooks, and completion without mandatory core HTTP accounting.
 
-Validate missing boundaries with an independent extension that uses matched-route state and modifies the actual rewritten outbound request. Changing an inbound header that is later forwarded does not validate the outbound hook. Preserve the ordering in ADR-0004, and do not stabilize Go signatures solely because the architectural direction is accepted.
+The [outbound-signing experiment](../../extensions/outboundsign/README.md) validates `BeforeUpstreamHook` using route-middleware state and the actual rewritten outbound request. A private transport wrapper provides the fallible boundary after `ReverseProxy.Rewrite`, which cannot return errors. Tests verify hook ordering, upstream-observed signatures, request isolation, error redaction, skipping transport on failure, body closure, cancellation, concurrency, and completion after middleware unwinds or an outbound hook panics.
+
+No route-matched hook was needed for signing. Dedicated route-matched hooks and structured failure provenance remain follow-up work, not existing capabilities. When a route-matched hook is needed, verify that route middleware establishes state before it runs. Preserve the ordering in ADR-0004, and do not stabilize Go signatures solely because the architectural direction is accepted or one experiment succeeds.

@@ -62,7 +62,7 @@ Completion receives the gateway entry context, which does not contain contexts d
 ## Interpretation and limits
 
 - `Rejected` means a valid `gateway.HTTPError`, or a local 4xx response. A normal upstream 4xx/5xx remains `UpstreamResponse`, not a proxy execution failure.
-- `ProxyError` means a non-rejection gateway error after an upstream was selected. It includes transport and response-hook failures, not just connection failures. The current core does not expose exact error-phase provenance.
+- `ProxyError` means a non-rejection gateway error after an upstream was selected. It includes outbound-hook, transport, and response-hook failures, not just connection failures. An outbound-signing failure can have a selected upstream without any transport invocation. The current core does not expose exact error-phase provenance.
 - `Upstream` names the selected origin. It does not prove that the upstream received the request or count connection attempts.
 - `UpstreamStatusCode` is a snapshot at the observer's response hook. Later hooks may modify or reject it. `StatusCode` reflects the downstream response observed by middleware.
 - A handler that returns normally without writing is recorded as 200. An early panic retains status 0 rather than inventing success. Panic values continue to propagate.

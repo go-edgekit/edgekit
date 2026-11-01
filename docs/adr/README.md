@@ -34,7 +34,7 @@ Do not silently change the rationale of accepted ADRs. Write a new ADR to supers
 2. Concrete rejection and structured failure-provenance types (ADR-0009). Execution facts, HTTP observations, and interpretations have distinct owners; completion does not guarantee delivery.
 3. State-key API details (ADR-0005). Private typed keys, serial per-request access, and entry-context completion semantics are accepted. Asynchronous middleware requires revisiting the lifecycle contract.
 4. Route-specific hook registration (ADR-0004). Route middleware entering before route-matched hooks, registration-order hook execution, and outer completion are accepted.
-5. Public outbound-request hooks and, when needed, a selector strategy (ADRs 0003 and 0008). These are not implemented merely because the boundaries are described.
+5. Dedicated route-matched hooks and, when needed, a selector strategy (ADRs 0003 and 0008). These remain deferred. The outbound-signing experiment now exercises a provisional `BeforeUpstreamHook`; its exact signature is not stabilized.
 
 ## Experiment findings and next validation
 
@@ -46,6 +46,13 @@ The shared-context and access-log experiments demonstrate:
 - Middleware-owned status/byte accounting and trace-correlation snapshots without expanding the core outcome API.
 - Optional response-writer instrumentation tested for flushing, informational responses, streaming failures, and connection upgrades.
 
-The access-log middleware changes an inbound request header that is forwarded upstream; it does not validate a hook on the actual rewritten outbound request. Dedicated route-matched and outbound-request hooks, structured failure provenance, and a public selector remain deferred.
+The access-log middleware changes an inbound request header that is forwarded upstream; it does not validate a hook on the actual rewritten outbound request.
 
-When those capabilities are needed, test that route middleware establishes state before route-matched hooks and that outbound hooks see the rewritten request before transport execution. Do not treat interface stabilization, live-span annotation, asynchronous middleware, or durable billing as established by the current experiments.
+The [outbound-signing experiment](../../extensions/outboundsign/README.md) separately demonstrates:
+
+- Route middleware supplying private typed state to a provisional `BeforeUpstreamHook` after selection and rewriting.
+- The upstream receiving signatures for the rewritten destination, method, effective Host, and escaped URI, including base-path and query changes.
+- Ordered fallible outbound hooks before transport execution, with body closure and no delegation on hook failure.
+- Error redaction, controlled rejections, cancellation, concurrent route isolation, and completion after middleware unwinds, including outbound-hook panics.
+
+Signing did not require a route-matched hook. Dedicated route-matched hooks, structured failure provenance, and a public selector remain deferred. When a route-matched hook is needed, test that route middleware establishes state before it runs. Do not treat interface stabilization, production signing security, live-span annotation, asynchronous middleware, or durable billing as established by the current experiments.

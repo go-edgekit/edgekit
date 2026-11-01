@@ -58,6 +58,10 @@ func NewWithConfig(config Config) (*Gateway, error) {
 		return nil, err
 	}
 
+	transport := http.DefaultTransport
+	if len(hooks.outbound) != 0 {
+		transport = &outboundTransport{base: transport, hooks: hooks.outbound}
+	}
 	mux := http.NewServeMux()
 	seen := make(map[string]struct{}, len(routes))
 	for _, route := range routes {
@@ -75,6 +79,7 @@ func NewWithConfig(config Config) (*Gateway, error) {
 
 		target := *route.Upstream // Avoid sharing a mutable URL with the caller.
 		proxy := &httputil.ReverseProxy{
+			Transport: transport,
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				rc, _ := FromContext(pr.In.Context())
 				rc.upstream = &target
