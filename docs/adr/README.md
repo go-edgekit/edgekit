@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADRs)
 
-These ADRs separate framework choices from specific API-management features. The 2026-11-01 direction review accepted the remaining proposed ADRs or superseded them with ADRs 0011–0015. See the [roadmap](../roadmap.md) for the planned order of work.
+These ADRs separate framework choices from specific API-management features. The 2026-11-01 direction review accepted the remaining proposed ADRs or superseded them with ADRs 0011–0016. See the [roadmap](../roadmap.md) for the planned order of work.
 
 Acceptance does not freeze precise Go interfaces or mean every preferred extension point is implemented. The current APIs remain provisional, and implementation gaps are recorded in the relevant follow-up sections. See [the context map](../../CONTEXT-MAP.md) for the core and access-policy glossaries.
 
@@ -23,6 +23,7 @@ Acceptance does not freeze precise Go interfaces or mean every preferred extensi
 | [0013](0013-typed-rejections-and-replaceable-renderer.md) | Accepted | Rejections | Rejections carry headers; replaceable renderer with a `problem+json` default |
 | [0014](0014-multi-module-repository.md) | Accepted | Modules | Dependency-light core; bundled extensions with dependencies get their own modules |
 | [0015](0015-access-policy-model.md) | Accepted | Access policy | Limits per subject, evaluated independently, consumed at admission |
+| [0016](0016-core-owns-the-inbound-server.md) | Accepted | Serving edge | The core provides the hardened server; a bare handler loses server-level protections |
 
 ## Decision process
 

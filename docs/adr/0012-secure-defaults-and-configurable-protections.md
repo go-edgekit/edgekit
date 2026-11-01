@@ -20,9 +20,16 @@ Initial classification:
 
 | Secure defaults | Configurable protections |
 | --- | --- |
-| Path policy, reject mode (R1); query-semicolon rejection (R2); header-name alias rejection (R3); removal of untrusted identity headers (R4); 504/499 error mapping (R5); `Alt-Svc` stripping (R7); transport timeouts; header budgets; no ambient environment proxy; direct-peer forwarding headers | Egress origin and network allowlists; trusted-proxy networks (R6); admission capacity; slow-body idle deadlines (R9) |
+| Path policy, reject mode (R1); query-semicolon rejection (R2); header-name alias rejection (R3); removal of untrusted identity headers and extension-managed headers (R4); 504/499 error mapping (R5); `Alt-Svc` stripping (R7); rejection of opaque URIs, absolute-form targets, and `CONNECT`; no transparent transport compression; transport timeouts; header budgets and HTTP/2 limits (R8); progress-based idle deadlines (R9); no ambient environment proxy; direct-peer forwarding headers | Egress origin and network allowlists; trusted-proxy networks (R6); admission capacity |
 
 The request-body limit is a secure default with a conservative value. Routes that accept large uploads must override it explicitly.
+
+Further rules:
+
+- **Normalize mode** for the path policy forwards the normalized path to the upstream, never the original encoding.
+- **Transport compression:** the core forwards the client's `Accept-Encoding` unchanged and never decompresses upstream responses on its own initiative.
+- **Managed headers:** an extension may declare headers it owns, such as a header that tells the upstream the authenticated customer. The core removes these headers from inbound requests, in the same step as untrusted identity headers, so no extension needs its own stripping.
+- **Idle deadlines (R9)** reset on every read or write progress and use a generous default (about 300s). Streaming routes may relax them. They require the core-owned server ([ADR-0016](0016-core-owns-the-inbound-server.md)).
 
 Relaxing a secure default is an explicit configuration choice, never the result of omitting a value. Body limits, admission, and egress move from optional packages into the core as protections.
 
@@ -41,4 +48,6 @@ The project still does not claim production readiness until requirements and tes
 
 ## Validation / follow-up
 
-R6 and R8–R11 remain on the [roadmap](../roadmap.md) after the bundled policy extensions. Reclassify a protection only with evidence about workloads.
+Typed dial and request-written failures (R10) are built with the core rewrite, so that R5 does not depend on error strings. R6 and R11 remain on the [roadmap](../roadmap.md) after the bundled policy extensions.
+
+The classification was extended on 2026-11-01, after reviewing the [proxy implementation survey](../investigations/proxy-implementation-survey.md) against this ADR: managed headers, opaque/absolute-form/`CONNECT` rejection, and transport compression were added, and R9 moved from configurable protection to secure default. Reclassify a protection only with evidence about workloads.

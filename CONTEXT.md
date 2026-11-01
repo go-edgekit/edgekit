@@ -19,6 +19,10 @@ A protection the core enables without configuration because a safe value exists 
 A protection the core provides but leaves off until configured, because a safe value depends on the deployment.
 _Avoid_: Optional extension (it is core, not an extension)
 
+**Managed header**:
+A header whose meaning the gateway or an extension owns, such as a forwarding or identity header. The core removes managed headers from inbound requests before any extension sets them.
+_Avoid_: Trusted header
+
 **Extension point**:
 A place where the core lets outside code take part in handling: middleware, lifecycle hooks, the transport, and later upstream selection.
 

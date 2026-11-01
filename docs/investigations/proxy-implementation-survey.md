@@ -2,6 +2,8 @@
 
 **Status:** Investigation report, not an architecture decision or production-readiness claim
 
+> **Update 2026-11-01:** The ownership column below predates the direction review. [ADR-0012](../adr/0012-secure-defaults-and-configurable-protections.md) and [ADR-0016](../adr/0016-core-owns-the-inbound-server.md) now classify these items: R1–R5 and R7–R9 are core secure defaults, R10 is part of the core rewrite, and R6 is a configurable protection. Open questions 1 and 2 are answered there. [ADR-0001](../adr/0001-framework-scope.md) is superseded by [ADR-0011](../adr/0011-library-first-gateway-framework.md).
+
 This report compares how Go reverse proxies and gateways implement the proxy request path at the source level. It focuses on forwarding mechanics, defaults, and hardening. The [gateway survey](high-over.md) covers product scope and extension models; this report does not repeat it.
 
 No ADR status, public API, or framework default changes because of this report. The [recommendations](#recommendations-for-this-project) are candidates for future focused passes, in the style of [the risk follow-ups](proxy-risk-follow-ups.md).

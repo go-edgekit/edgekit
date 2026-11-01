@@ -6,12 +6,14 @@ The current code is a prototype. It is replaced by a rewrite, not evolved. The e
 
 ## 1. Settle direction
 
-Done: ADRs 0011–0015, status changes for 0002 and 0006–0008, and the [context map](../CONTEXT-MAP.md).
+Done: ADRs 0011–0016, status changes for 0002 and 0006–0008, and the [context map](../CONTEXT-MAP.md).
 
 ## 2. Rewrite the core
 
 - New public module path and Apache-2.0 license ([ADR-0014](adr/0014-multi-module-repository.md)).
-- Secure defaults R1–R5 and R7, transport and header defaults; body limit, admission, and egress as core protections ([ADR-0012](adr/0012-secure-defaults-and-configurable-protections.md)).
+- Secure defaults R1–R5, R7, R8, and R9; opaque/absolute-form/`CONNECT` rejection; no transparent transport compression; extension-managed headers; body limit, admission, and egress as core protections ([ADR-0012](adr/0012-secure-defaults-and-configurable-protections.md)).
+- Core-owned hardened server ([ADR-0016](adr/0016-core-owns-the-inbound-server.md)).
+- Typed dial and request-written failures (R10) as execution facts, used by error mapping.
 - Upstream-selector extension point with static selection ([ADR-0008](adr/0008-separate-routing-from-upstream-selection.md)).
 - Typed rejections and replaceable `problem+json` renderer ([ADR-0013](adr/0013-typed-rejections-and-replaceable-renderer.md)).
 - Path and query rewriting on routes; routes no longer always forward the original path.
@@ -30,7 +32,7 @@ Proves the Tyk limitations can be solved without core changes ([ADR-0015](adr/00
 
 ## 4. Remaining hardening and analytics
 
-- R6 trusted-proxy mode, R8 HTTP/2 limits, R9 slow-body idle deadlines, R10 typed dial errors, R11 idle-connection retirement.
+- R6 trusted-proxy mode, R11 idle-connection retirement.
 - Analytics: the access-log extension with a sink interface; exporters as separate modules.
 
 ## Deferred
