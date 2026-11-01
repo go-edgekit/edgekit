@@ -57,6 +57,7 @@ go run ./cmd/gateway
 │   └── upstream/main.go          # Local demo backend
 ├── extensions/
 │   ├── accesslog/               # HTTP accounting, trace correlation, completion records
+│   ├── bodylimit/               # Optional streaming request-body limits
 │   ├── headers/headers.go       # Middleware-only extension
 │   ├── outboundsign/            # Signing the rewritten request using route state
 │   └── requesttag/requesttag.go # Middleware and lifecycle hooks sharing state
@@ -119,7 +120,7 @@ Create RequestContext and attach it to the standard context
 Completion hooks
 ```
 
-Hooks run in registration order, including completion hooks. A request, outbound, or response hook error stops that phase. Return `&gateway.HTTPError{StatusCode: 403, Message: "denied"}` for a controlled rejection. Other request-hook errors produce a generic 500; outbound-hook, proxy, and upstream-response-hook errors produce a generic 502. Error details remain in `Outcome.Err`, not the response. Normal upstream HTTP error statuses are forwarded and are not Go errors.
+Hooks run in registration order, including completion hooks. A request, outbound, or response hook error stops that phase. Return `&gateway.HTTPError{StatusCode: 403, Message: "denied"}` for a controlled rejection. Other request-hook errors produce a generic 500; outbound-hook, proxy, and upstream-response-hook errors produce a generic 502. A wrapped `*http.MaxBytesError` from request-body reading receives a generic 413. Error details remain in `Outcome.Err`, not the response. Normal upstream HTTP error statuses are forwarded and are not Go errors.
 
 Completion runs once per gateway invocation after the middleware chain unwinds, even if middleware rejects, routing misses or redirects, or handling panics. Registered middleware must call `next` synchronously and at most once. Middleware that returns while downstream work continues (such as `http.TimeoutHandler`) is outside this experiment's lifecycle contract. Completion hooks must not panic or write a response. They receive the gateway entry context, which may already be canceled, rather than contexts derived inside middleware. Panics, including streaming aborts, continue to propagate.
 
@@ -152,7 +153,7 @@ This project supports **compile-time extensions**. It intentionally does not pro
 
 ## Observability experiment
 
-`extensions/accesslog` combines HTTP middleware with response and completion hooks, without changing the core API. The demo uses it to report generated request IDs, route and upstream metadata, upstream and downstream statuses, response-body byte counts, duration, write errors, and gateway outcomes. It distinguishes local rejection, normal upstream HTTP errors, proxy execution errors, and aborted responses.
+`extensions/accesslog` combines HTTP middleware with response and completion hooks, without changing the core API. The demo uses it to report generated request IDs, route and upstream metadata, upstream and downstream statuses, response-body byte counts, duration, error-presence flags, and gateway outcomes. It distinguishes local rejection, normal upstream HTTP errors, proxy execution errors, and aborted responses.
 
 Trace correlation is optional: provide `accesslog.Config.TraceID` and register tracing middleware before access-log middleware. The extension snapshots the trace ID from the derived context rather than expecting completion to inherit that context. No tracing SDK is installed by the demo.
 
@@ -166,6 +167,42 @@ The integration tests verify signatures at a local upstream, including upstream 
 
 See [the outbound-signing experiment](extensions/outboundsign/README.md) for registration and limits. This is not a production authentication protocol: bodies are not signed and replay protection is absent. The hook API remains experimental.
 
+## Proxy safety boundaries
+
+This is a focused hardening baseline, **not production readiness**. Ownership is explicit:
+
+| Owner | Protection / configuration |
+| --- | --- |
+| Framework | Standard `ReverseProxy` hop-by-hop handling; rebuild standard forwarding headers from the immediate peer; discard client `X-Real-IP`; preserve streaming, cancellation, and writer capabilities |
+| Embedding application | Supply a reusable `Config.Transport` for connection, TLS, response-header, and pool policy; configure the inbound `http.Server` |
+| Optional middleware | [Request-body limits](extensions/bodylimit/README.md), applied globally or per route without buffering |
+| Example executable | Explicit transport/server settings, an 8 MiB body limit on `/api/`, and a completion-log sink that omits raw paths and errors |
+
+### Forwarding-header trust
+
+`Rewrite` uses `SetURL` and `SetXForwarded`. Client `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` are removed, not appended or trusted. `X-Real-IP` is also discarded. The outbound values describe the immediate connection: peer IP, inbound Host, and TLS state. The inbound Host is client-controlled, not a validated identity. Behind another proxy these values describe that hop, not the original client. Trusted-chain reconstruction and Host validation require deployment-specific policy, not a blind copy of inbound headers. Other vendor-specific identity headers are not comprehensively filtered.
+
+Standard hop-by-hop headers and `Connection`-nominated headers are stripped in both directions. Go preserves the protocol exceptions for `TE: trailers` and upgrades. Trusted compiled-in outbound/response hooks run after this sanitation and must not reintroduce unsafe headers. Tests cover spoofed duplicate headers, Connection-nominated fields, end-to-end headers, trailers negotiation, and existing upgrade behavior.
+
+### Transport and timeout ownership
+
+`Config.Transport` is shared by all routes, including when outbound hooks are enabled. Configure it once before serving; the caller owns its lifetime and `CloseIdleConnections`. Nil retains `http.DefaultTransport` for compatibility, including its environment-proxy behavior and lack of a response-header timeout. The framework neither creates per-request transports nor imposes a universal stream deadline.
+
+`cmd/gateway` clones the standard transport once and disables ambient HTTP proxy variables. Its example policy is:
+
+- Dial timeout: 3s; TCP keepalive: 30s; TLS handshake timeout: 5s.
+- Response-header timeout: 10s; expect-continue timeout: 1s.
+- Idle-connection timeout: 90s; maximum idle connections: 100 overall / 16 per host; maximum connections per host: 64.
+- Inbound header-read timeout: 5s; inbound idle timeout: 60s. No blanket `ReadTimeout`, `WriteTimeout`, or total request deadline.
+
+These are source-level example settings, not new framework defaults or environment configuration. Response-header timing starts after the request body is written; it does not bound slow uploads, pool queue waits, or response-body duration. Idle timeouts do not limit active streams. Request contexts cancel dial/queue/transport work and streaming copies; a cancellation after response commitment can abort rather than replace the response. Completion still means handling ended, not successful delivery. Tests exercise timeout failures, connection reuse, streaming beyond the header budget, incremental uploads, and real client disconnects before and after response headers.
+
+### Remaining risks
+
+- **Destination restrictions:** startup validation only requires an HTTP(S) URL with a host. There is no destination allowlist, resolved-IP validation, DNS-rebinding defense, or restriction on loopback, private, link-local, metadata-service, or credential-bearing URLs. Static configuration is trusted, not an SSRF defense. A deployment needs egress controls and, where required, validation at resolution/connection time. Compiled-in extensions and custom transports are trusted code, not sandboxed.
+- **Sensitive data:** generic framework failures hide error details from clients, but `HTTPError.Message` is explicitly public. `Outcome.Err`, access-log records, extension callbacks, and standard `ReverseProxy` streaming/upgrade diagnostics can still contain sensitive data. The example omits raw request paths/errors and raw configured upstream URLs from its own request/startup logs; this is not a complete logging/redaction policy. Audit other sinks, route labels, origin names, and extension-provided fields before deployment.
+- **Resource and operational limits:** slow request/response bodies, idle active streams, aggregate concurrency, pool queues, response/header sizes, decompression, TLS termination, graceful termination of long-lived streams/upgrades, and load behavior still need application-specific review. Body limits are streaming read limits, not all-or-nothing upload validation. Keep Go patched; using the standard proxy does not remove protocol/security maintenance.
+
 ## Boundaries to revisit later
 
 - Inbound middleware wraps `http.Handler` and can reject requests before proxying.
@@ -173,6 +210,6 @@ See [the outbound-signing experiment](extensions/outboundsign/README.md) for reg
 - Upstream response hooks use `ReverseProxy.ModifyResponse`; local responses do not run them. Forwarded informational responses are outside this hook, except protocol upgrades (101).
 - Outbound hooks run once per proxy round trip, not per transport-internal retry or connection attempt. Register signing after hooks that modify signed fields; the transport may still add protocol headers and choose wire framing. Hooks must preserve context and body ownership. Replaceable upstream selection remains deferred.
 - Route-specific hooks, live-span annotation, exact proxy-error phases, asynchronous middleware, and response-body transformations need concrete use cases before expanding the public API.
-- Production use will require additional configuration management, security review, TLS, request size limits, appropriate timeouts, reliable telemetry, and more thorough HTTP behavior tests.
+- Production use will require configuration management, security review, TLS, workload-specific limits/timeouts, reliable telemetry, and broader protocol/load verification beyond the protections above.
 
 The exported API is intentionally experimental; rename the module path before publishing.

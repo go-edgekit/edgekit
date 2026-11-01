@@ -61,7 +61,8 @@ type Outcome struct {
 }
 
 // HTTPError rejects a request with a public message and a 4xx or 5xx status.
-// Other errors receive a generic response; their details are not sent to clients.
+// A http.MaxBytesError receives a generic 413. Other errors receive a generic
+// response; their details are not sent to clients.
 // Invalid status codes produce a generic 500 response.
 type HTTPError struct {
 	StatusCode int
@@ -120,6 +121,10 @@ func isNilExtension(extension any) bool {
 func renderError(w http.ResponseWriter, rc *RequestContext, err error, fallback int) {
 	rc.err = err
 	status := fallback
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		status = http.StatusRequestEntityTooLarge
+	}
 	message := http.StatusText(status)
 	var rejection *HTTPError
 	if errors.As(err, &rejection) && rejection != nil {

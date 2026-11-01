@@ -30,6 +30,10 @@ type Config struct {
 	// Hooks execute in registration order, including completion hooks.
 	// Instances are shared across requests and must support concurrent requests.
 	Extensions []any
+	// Transport is shared by all routes. Nil uses http.DefaultTransport.
+	// The caller owns configuration and idle-connection cleanup. Configure it
+	// before serving and do not mutate it while requests are active.
+	Transport http.RoundTripper
 }
 
 // Gateway implements http.Handler. It is configured once at startup.
@@ -58,10 +62,11 @@ func NewWithConfig(config Config) (*Gateway, error) {
 		return nil, err
 	}
 
-	transport := http.DefaultTransport
-	if len(hooks.outbound) != 0 {
-		transport = &outboundTransport{base: transport, hooks: hooks.outbound}
+	transport := config.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
 	}
+	transport = &outboundTransport{base: transport, hooks: hooks.outbound}
 	mux := http.NewServeMux()
 	seen := make(map[string]struct{}, len(routes))
 	for _, route := range routes {
@@ -84,7 +89,9 @@ func NewWithConfig(config Config) (*Gateway, error) {
 				rc, _ := FromContext(pr.In.Context())
 				rc.upstream = &target
 				pr.SetURL(&target)
-				// Forwarded headers from untrusted clients are cleared by Rewrite.
+				// ReverseProxy clears standard forwarding headers before Rewrite.
+				// Do not pass a competing client-supplied identity to the upstream.
+				pr.Out.Header.Del("X-Real-IP")
 				pr.SetXForwarded()
 			},
 			ModifyResponse: func(response *http.Response) error {

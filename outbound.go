@@ -10,9 +10,11 @@ type outboundTransport struct {
 }
 
 func (t *outboundTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	// RoundTripper must not mutate the caller's request metadata. The clone is
-	// the request passed to both hooks and the underlying transport.
-	out := r.Clone(r.Context())
+	// Isolate hook mutations from the caller's request metadata.
+	out := r
+	if len(t.hooks) != 0 {
+		out = r.Clone(r.Context())
+	}
 	rc, _ := FromContext(out.Context())
 	for _, hook := range t.hooks {
 		if err := hook.OnBeforeUpstream(out.Context(), rc, out); err != nil {
@@ -23,5 +25,11 @@ func (t *outboundTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 			return nil, err
 		}
 	}
-	return t.base.RoundTrip(out)
+	response, err := t.base.RoundTrip(out)
+	if response != nil && response.Request == nil {
+		// Custom RoundTrippers may omit Request. Response hooks still need
+		// the execution context that was passed to the transport.
+		response.Request = out
+	}
+	return response, err
 }
