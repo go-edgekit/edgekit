@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
+
+	"example.com/go-gateway-starter/internal/safelog"
 )
 
 func main() {
+	safelog.ConfigureDefault(os.Stderr)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -19,7 +23,8 @@ func main() {
 		})
 	})
 	slog.Info("sample upstream listening", "address", ":9090")
-	if err := http.ListenAndServe(":9090", mux); err != nil {
-		slog.Error("upstream failed", "error", err)
+	server := &http.Server{Addr: ":9090", Handler: mux, ErrorLog: safelog.New("upstream_http_server")}
+	if err := server.ListenAndServe(); err != nil {
+		slog.Error("upstream failed", "error_kind", safelog.ErrorKind(err))
 	}
 }

@@ -24,10 +24,11 @@ access := accesslog.New(accesslog.Config{
             "status", record.StatusCode,
             "bytes", record.BytesWritten,
             "result", record.Result,
-            "route", record.RoutePrefix,
-            "upstream", record.Upstream,
+            "route_matched", record.RoutePrefix != "",
+            "upstream_selected", record.Upstream != "",
             "duration", record.Outcome.Duration,
-            "error", record.Outcome.Err)
+            "has_error", record.Outcome.Err != nil,
+            "has_response_error", record.ResponseError != nil)
     },
 })
 app, err := gateway.NewWithConfig(gateway.Config{
@@ -39,7 +40,7 @@ app, err := gateway.NewWithConfig(gateway.Config{
 
 `accesslog` is `example.com/go-gateway-starter/extensions/accesslog`. The demo in `cmd/gateway/main.go` registers it and writes records with `log/slog`.
 
-The middleware replaces client-supplied `X-Request-ID` values with a random 128-bit ID, forwards it upstream, returns it to the client, and exposes it through `RequestIDFromContext`. Query strings, request bodies, authorization headers, and credentials in configured upstream URLs are not copied into dedicated record fields. Paths and errors may still be sensitive; the reporter owns redaction and storage policy.
+The middleware replaces client-supplied `X-Request-ID` values with a random 128-bit ID, forwards it upstream, returns it to the client, and exposes it through `RequestIDFromContext`. Query strings, request bodies, authorization headers, and credentials in configured upstream URLs are not copied into dedicated record fields. Paths, origins, route labels, trace IDs, arbitrary method tokens, and errors may still be sensitive; the reporter owns field selection, redaction, and storage policy. Records are not safe to serialize wholesale. The demo uses log-only allowlists for method/result labels and omits raw paths, origins, route labels, trace IDs, and error text. It does not change the original record or error. See [the diagnostic audit](../../docs/investigations/sensitive-diagnostics.md) for proxy/server/process logging boundaries.
 
 ## Tracing integration
 

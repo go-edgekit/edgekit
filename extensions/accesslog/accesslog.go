@@ -29,8 +29,9 @@ const (
 )
 
 // Record is a completion snapshot. Its request fields omit bodies, query strings,
-// authorization headers, and upstream credentials. Path and errors can still
-// contain sensitive data; the callback owns redaction and storage policy.
+// authorization headers, and upstream credentials. Paths, origins, labels,
+// trace IDs, method tokens, and errors can still contain sensitive data. The
+// callback owns field selection, redaction, and storage policy.
 type Record struct {
 	RequestID   string
 	TraceID     string

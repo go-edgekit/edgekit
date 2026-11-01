@@ -23,7 +23,9 @@ The [first proxy-hardening pass](../../README.md#proxy-safety-boundaries) establ
 
 **Owner:** Framework integration points and executable log sinks.
 
-Audit every sink, including `ReverseProxy` and `http.Server` diagnostics, extension callbacks, startup failures, and panic reporting. Prefer safe error classifications to arbitrary error strings. Preserve original execution errors internally without automatically logging them. Test with credentials, tokens, paths, and query strings embedded in failures. Do not turn extension interpretations into core execution facts or add another lifecycle hook solely for logging.
+**Initial implementation:** The [diagnostic audit](sensitive-diagnostics.md) records source-only framework proxy diagnostics, source-only server/standard logging in the example executables, and allowlisted example completion/failure fields. Original records/errors and completion behavior are preserved; no public logging API or lifecycle hook was added.
+
+Continue auditing deployment sinks, including `ReverseProxy` and `http.Server` diagnostics, extension callbacks, startup failures, and panic reporting. Prefer safe error classifications to arbitrary error strings. Preserve original execution errors internally without automatically logging them. Test with credentials, tokens, paths, and query strings embedded in failures. Do not turn extension interpretations into core execution facts or add another lifecycle hook solely for logging.
 
 ## 3. Resource limits and slow bodies
 

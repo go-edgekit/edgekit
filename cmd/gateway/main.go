@@ -16,13 +16,15 @@ import (
 	"example.com/go-gateway-starter/extensions/accesslog"
 	"example.com/go-gateway-starter/extensions/bodylimit"
 	"example.com/go-gateway-starter/extensions/headers"
+	"example.com/go-gateway-starter/internal/safelog"
 )
 
 func main() {
+	safelog.ConfigureDefault(os.Stderr)
 	upstreamAddress := env("GATEWAY_UPSTREAM", "http://127.0.0.1:9090")
 	upstream, err := url.Parse(upstreamAddress)
 	if err != nil {
-		slog.Error("invalid upstream")
+		logFailure("invalid upstream", err)
 		os.Exit(1)
 	}
 
@@ -43,23 +45,18 @@ func main() {
 		Transport:   transport,
 	})
 	if err != nil {
-		slog.Error("gateway configuration failed", "error", err)
+		logFailure("gateway configuration failed", err)
 		os.Exit(1)
 	}
 
-	server := &http.Server{
-		Addr:              env("GATEWAY_LISTEN_ADDR", ":8080"),
-		Handler:           app,
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
+	server := newHTTPServer(app)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go func() {
-		slog.Info("gateway listening", "address", server.Addr)
+		slog.Info("gateway listening")
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("gateway server failed", "error", err)
+			logFailure("gateway server failed", err)
 			stop()
 		}
 	}()
@@ -68,7 +65,17 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		slog.Error("gateway shutdown failed", "error", err)
+		logFailure("gateway shutdown failed", err)
+	}
+}
+
+func newHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              env("GATEWAY_LISTEN_ADDR", ":8080"),
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		ErrorLog:          safelog.New("http_server"),
 	}
 }
 
@@ -90,14 +97,53 @@ func newUpstreamTransport() *http.Transport {
 }
 
 func logCompletion(record accesslog.Record) {
-	// Paths and arbitrary errors may contain secrets. Keep them out of this sink.
-	slog.Info("request completed", "request_id", record.RequestID, "trace_id", record.TraceID,
-		"method", record.Method, "route", record.RoutePrefix,
-		"upstream", record.Upstream, "upstream_status", record.UpstreamStatusCode,
-		"status", record.StatusCode, "bytes", record.BytesWritten, "result", record.Result,
+	// Retain observations without echoing paths, origins, route labels, trace
+	// values, or arbitrary errors. Only this extension's generated ID is logged.
+	slog.Info("request completed", "request_id", safeRequestID(record.RequestID),
+		"method", safeMethod(record.Method), "route_matched", record.RoutePrefix != "",
+		"upstream_selected", record.Upstream != "", "upstream_status", record.UpstreamStatusCode,
+		"status", record.StatusCode, "bytes", record.BytesWritten, "result", safeResult(record.Result),
 		"duration", record.Outcome.Duration, "has_error", record.Outcome.Err != nil,
-		"has_response_error", record.ResponseError != nil, "aborted", record.Outcome.Aborted,
-		"hijacked", record.Hijacked)
+		"error_kind", safelog.ErrorKind(record.Outcome.Err),
+		"has_response_error", record.ResponseError != nil, "response_error_kind", safelog.ErrorKind(record.ResponseError),
+		"aborted", record.Outcome.Aborted, "hijacked", record.Hijacked)
+}
+
+func logFailure(event string, err error) {
+	// Callers use static event labels, never arbitrary error messages.
+	slog.Error(event, "error_kind", safelog.ErrorKind(err))
+}
+
+func safeMethod(method string) string {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodDelete,
+		http.MethodConnect, http.MethodOptions, http.MethodTrace, http.MethodPatch:
+		return method
+	default:
+		return "OTHER"
+	}
+}
+
+func safeResult(result accesslog.Result) string {
+	switch result {
+	case accesslog.LocalResponse, accesslog.UpstreamResponse, accesslog.Rejected, accesslog.GatewayError,
+		accesslog.ProxyError, accesslog.WriteError, accesslog.Aborted:
+		return string(result)
+	default:
+		return "unknown"
+	}
+}
+
+func safeRequestID(id string) string {
+	if len(id) != 32 {
+		return ""
+	}
+	for _, c := range id {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return ""
+		}
+	}
+	return id
 }
 
 func env(name, fallback string) string {

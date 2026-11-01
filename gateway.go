@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"example.com/go-gateway-starter/internal/safelog"
 )
 
 // Route associates a URL prefix with one upstream and optional middleware.
@@ -85,6 +87,7 @@ func NewWithConfig(config Config) (*Gateway, error) {
 		target := *route.Upstream // Avoid sharing a mutable URL with the caller.
 		proxy := &httputil.ReverseProxy{
 			Transport: transport,
+			ErrorLog:  safelog.New("reverse_proxy"),
 			Rewrite: func(pr *httputil.ProxyRequest) {
 				rc, _ := FromContext(pr.In.Context())
 				rc.upstream = &target

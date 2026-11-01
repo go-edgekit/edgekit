@@ -62,6 +62,7 @@ go run ./cmd/gateway
 │   ├── headers/headers.go       # Middleware-only extension
 │   ├── outboundsign/            # Signing the rewritten request using route state
 │   └── requesttag/requesttag.go # Middleware and lifecycle hooks sharing state
+├── internal/safelog/            # Source-only diagnostic adapters for core/examples
 ├── gateway.go                   # Routes, gateway constructor, proxy
 ├── middleware.go                # Middleware type and Chain()
 ├── hooks.go                     # Optional hook interfaces and outcomes
@@ -89,7 +90,8 @@ access := accesslog.New(accesslog.Config{
             "status", record.StatusCode,
             "result", record.Result,
             "duration", record.Outcome.Duration,
-            "error", record.Outcome.Err)
+            "has_error", record.Outcome.Err != nil,
+            "has_response_error", record.ResponseError != nil)
     },
 })
 app, err := gateway.NewWithConfig(gateway.Config{
@@ -154,7 +156,7 @@ This project supports **compile-time extensions**. It intentionally does not pro
 
 ## Observability experiment
 
-`extensions/accesslog` combines HTTP middleware with response and completion hooks, without changing the core API. The demo uses it to report generated request IDs, route and upstream metadata, upstream and downstream statuses, response-body byte counts, duration, error-presence flags, and gateway outcomes. It distinguishes local rejection, normal upstream HTTP errors, proxy execution errors, and aborted responses.
+`extensions/accesslog` combines HTTP middleware with response and completion hooks, without changing the core API. The demo uses it to report generated request IDs, route/upstream selection flags, upstream and downstream statuses, response-body byte counts, duration, safe error-kind labels, and gateway outcomes. It distinguishes local rejection, normal upstream HTTP errors, proxy execution errors, and aborted responses.
 
 Trace correlation is optional: provide `accesslog.Config.TraceID` and register tracing middleware before access-log middleware. The extension snapshots the trace ID from the derived context rather than expecting completion to inherit that context. No tracing SDK is installed by the demo.
 
@@ -178,7 +180,7 @@ This is a focused hardening baseline, **not production readiness**. Ownership is
 | Embedding application | Supply a reusable `Config.Transport` for connection, TLS, response-header, and pool policy; configure the inbound `http.Server` |
 | Optional middleware | [Request-body limits](extensions/bodylimit/README.md), applied globally or per route without buffering |
 | Optional transport package | [Direct upstream origin/IP restrictions](extensions/egress/README.md), enabled only with explicit deployment allowlists |
-| Example executable | Explicit transport/server settings, an 8 MiB body limit on `/api/`, and a completion-log sink that omits raw paths and errors |
+| Example executable | Explicit transport/server settings, an 8 MiB body limit on `/api/`, source-only diagnostics, and allowlisted completion-log fields |
 
 ### Forwarding-header trust
 
@@ -203,12 +205,18 @@ These are source-level example settings, not new framework defaults or environme
 
 [`extensions/egress`](extensions/egress/README.md) uses `Config.Transport` to enforce explicit allowed HTTP(S) origins and IP networks. It validates every DNS answer before dialing validated IP literals, while preserving HTTP/TLS identities and connection reuse. It owns a clean transport so ambient proxies and template dial/protocol callbacks cannot bypass these checks. This package is opt-in; the demo does not infer permitted deployment networks or enable it automatically. No core lifecycle API or default destination policy changes.
 
+### Sensitive diagnostics
+
+The framework's private `ReverseProxy.ErrorLog` emits source-only structured warnings via `slog.Default()`, not raw standard-library diagnostic text. Original errors remain unchanged in `Outcome.Err` and extension records. No process-wide logging configuration is changed by constructing a gateway.
+
+The example executables explicitly install JSON logging, source-only `http.Server` diagnostics, and a source-only global standard logger. The last boundary also covers transport diagnostics that bypass proxy/server loggers. The gateway example omits raw paths, origins, route labels, trace IDs, configured listen/upstream values, and error strings from its own sinks; methods/results use known labels. This loses diagnostic detail by design. Embedders own server/process log configuration and all custom sinks. See [the diagnostic audit](docs/investigations/sensitive-diagnostics.md) for protections, tests, and remaining gaps.
+
 ### Remaining risks
 
 The [follow-up plan](docs/investigations/proxy-risk-follow-ups.md) records five focused passes, ownership, verification, and deferred work.
 
 - **Destination restrictions:** default framework validation still only requires an HTTP(S) URL with a host. Without the optional egress transport there is no origin/IP allowlist or connection-time validation. With it, deployments must still choose narrow origin/network lists, apply network-level egress controls, and handle connection retirement and network translation. Static configuration is trusted, not a complete SSRF defense. Compiled-in extensions, callbacks, and custom transports are trusted code, not sandboxed.
-- **Sensitive data:** generic framework failures hide error details from clients, but `HTTPError.Message` is explicitly public. `Outcome.Err`, access-log records, extension callbacks, and standard `ReverseProxy` streaming/upgrade diagnostics can still contain sensitive data. The example omits raw request paths/errors and raw configured upstream URLs from its own request/startup logs; this is not a complete logging/redaction policy. Audit other sinks, route labels, origin names, and extension-provided fields before deployment.
+- **Sensitive data:** generic framework failures hide error details from clients, but `HTTPError.Message` is explicitly public. `Outcome.Err`, access-log records, constructor errors, extension callbacks, and panic values remain sensitive internally. Custom sinks, application-created servers/loggers, runtime crash output, and debug facilities need deployment review. Source-only proxy diagnostics and the example process log policy do not make arbitrary records safe to serialize or provide a complete redaction policy.
 - **Resource and operational limits:** slow request/response bodies, idle active streams, aggregate concurrency, pool queues, response/header sizes, decompression, TLS termination, graceful termination of long-lived streams/upgrades, and load behavior still need application-specific review. Body limits are streaming read limits, not all-or-nothing upload validation. Keep Go patched; using the standard proxy does not remove protocol/security maintenance.
 
 ## Boundaries to revisit later

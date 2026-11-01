@@ -53,7 +53,9 @@ type CompletionHook interface {
 type Outcome struct {
 	Duration time.Duration
 	// Err is an error seen by a lifecycle hook or proxy error handler.
-	// Local middleware responses and HTTP error statuses are not Go errors.
+	// It is retained unchanged and may contain secrets; it is not safe to log
+	// without application policy. Local middleware responses and HTTP error
+	// statuses are not Go errors.
 	Err error
 	// Aborted means the middleware chain did not return normally. Streaming
 	// failures can abort after headers are committed without setting Err.
