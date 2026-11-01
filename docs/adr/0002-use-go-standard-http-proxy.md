@@ -1,6 +1,6 @@
 # ADR-0002: Use the Go standard HTTP stack for serving and proxying
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-01)
 - **Date:** 2026-10-31
 - **Decision owners:** Project maintainers
 

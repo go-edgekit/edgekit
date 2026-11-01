@@ -75,3 +75,5 @@ Avoid generic retries by default; retry policy must account for idempotency, bod
 Existing tests cover success, local rejection, routing misses, connection failures, canceled contexts, partial writes, streaming aborts, and connection upgrades. The access-log experiment combines middleware-owned HTTP accounting with gateway metadata and outcomes without changing the core API.
 
 Preserve tests distinguishing upstream HTTP errors from proxy execution errors and explicit rejections from unexpected failures. Add failure-phase facts when implemented, with unknown states where needed. Keep the access-log extension's result classification explicitly separate from the core execution model, and test optional response-writer instrumentation independently.
+
+**Amended 2026-11-01:** [ADR-0013](0013-typed-rejections-and-replaceable-renderer.md) replaces the `HTTPError` experiment with typed rejections that carry headers, and a replaceable renderer with a `problem+json` default.

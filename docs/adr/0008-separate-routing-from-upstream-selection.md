@@ -1,6 +1,6 @@
 # ADR-0008: Separate route matching from upstream selection
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-01)
 - **Date:** 2026-10-31
 - **Decision owners:** Project maintainers
 
@@ -33,3 +33,5 @@ Only add a public `UpstreamSelector` interface when a concrete alternative to st
 ## Validation / follow-up
 
 Initially test two static routes. Later test a custom selector choosing between two upstreams without altering route matching or the reverse-proxy implementation.
+
+**Accepted 2026-11-01:** The core rewrite defines the upstream-selector extension point, with static selection as the default. Bundled load balancing and health checks remain deferred.

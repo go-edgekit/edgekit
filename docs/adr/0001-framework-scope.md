@@ -1,6 +1,6 @@
 # ADR-0001: Build an extensible gateway framework, not an API-management product
 
-- **Status:** Proposed
+- **Status:** Superseded by [ADR-0011](0011-library-first-gateway-framework.md)
 - **Date:** 2026-10-31
 - **Decision owners:** Project maintainers
 

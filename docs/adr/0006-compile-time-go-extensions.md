@@ -1,6 +1,6 @@
 # ADR-0006: Start with compile-time Go extensions, not dynamic plugins
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-01)
 - **Date:** 2026-10-31
 - **Decision owners:** Project maintainers
 
@@ -32,3 +32,5 @@ For the initial framework, extensions are ordinary Go packages. Users import pac
 ## Validation / follow-up
 
 Build an example extension entirely in a separate package and confirm it can be combined with another extension. Revisit dynamic loading only when there is a documented requirement.
+
+**Accepted 2026-11-01:** Bundled extensions follow the same rules as user extensions and get no private access to the core ([ADR-0011](0011-library-first-gateway-framework.md)). Module layout is in [ADR-0014](0014-multi-module-repository.md).

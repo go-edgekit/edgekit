@@ -1,6 +1,6 @@
 # Go API Gateway — Architecture & Design
 
-**Status:** Initial design exploration
+**Status:** Historical — initial design exploration. The current direction is in [ADR-0011](adr/0011-library-first-gateway-framework.md) and the [roadmap](roadmap.md).
 **Version:** 0.1
 
 This document records the initial exploration. See the [ADRs](adr/README.md) for current decisions and implementation gaps, and the [gateway survey assessment](investigations/high-over-findings.md) for findings compared with those decisions. The assessment does not expand the scaffold scope or change ADR statuses.

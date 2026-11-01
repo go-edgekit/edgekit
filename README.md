@@ -2,6 +2,8 @@
 
 A deliberately minimal, extensible API gateway in Go. It uses `net/http`, `httputil.ReverseProxy`, and ordinary HTTP middleware. No third-party dependencies.
 
+This code is a prototype for exploring how the parts interact. It will be replaced by a rewrite; see the [roadmap](docs/roadmap.md) and [ADRs](docs/adr/README.md) for the intended direction.
+
 ## What it does
 
 - Forwards all `/api/` requests to a configurable HTTP upstream, keeping the original path and query.

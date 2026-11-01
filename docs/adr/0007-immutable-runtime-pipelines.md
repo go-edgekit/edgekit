@@ -1,6 +1,6 @@
 # ADR-0007: Separate configuration from an immutable runtime pipeline
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-11-01)
 - **Date:** 2026-10-31
 - **Decision owners:** Project maintainers
 
@@ -35,3 +35,5 @@ The scaffold does **not** require dynamic configuration reload, an admin API, a 
 ## Validation / follow-up
 
 Test invalid startup configurations and concurrent requests through a compiled gateway. If hot reload is added later, build and validate a new snapshot before publishing it, and let in-flight requests retain their snapshot.
+
+**Accepted 2026-11-01:** Keep configuration separate from policy data. Configuration (routes, registered extensions, protections) is fixed in the snapshot. Policy data (keys, customers, limit assignments) changes at runtime through extension-owned stores and needs no reload. Hot reload of configuration remains deferred.

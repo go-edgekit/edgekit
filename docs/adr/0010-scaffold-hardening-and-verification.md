@@ -1,6 +1,6 @@
 # ADR-0010: Build a verification-oriented scaffold without claiming production readiness
 
-- **Status:** Proposed
+- **Status:** Superseded by [ADR-0012](0012-secure-defaults-and-configurable-protections.md)
 - **Date:** 2026-10-31
 - **Decision owners:** Project maintainers
 
