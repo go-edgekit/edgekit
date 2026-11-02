@@ -26,7 +26,7 @@ _Avoid_: Identity, principal
 
 **Limit**:
 A rule that allows or denies a request for one subject. Rate limits and quotas are both limits.
-_Avoid_: Policy (as Tyk uses it)
+_Avoid_: Policy (as API-management products use it: a bundle of limits and access rights)
 
 **Rate limit**:
 A limit that protects capacity over a short rolling window. It may be approximate and does not reset on a calendar.

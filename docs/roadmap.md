@@ -21,7 +21,7 @@ Done: ADRs 0011–0016, status changes for 0002 and 0006–0008, and the [contex
 
 ## 3. Bundled access-policy extensions
 
-Proves the Tyk limitations can be solved without core changes ([ADR-0015](adr/0015-access-policy-model.md)):
+Proves the motivating limitations can be solved without core changes ([ADR-0015](adr/0015-access-policy-model.md)):
 
 1. Key authentication with hashed key store and in-memory adapter.
 2. Rate limits (GCRA, sliding-window counter) and quotas (calendar periods) with a static limit source and in-memory store.
@@ -37,4 +37,4 @@ Proves the Tyk limitations can be solved without core changes ([ADR-0015](adr/00
 
 ## Deferred
 
-Distribution with declarative configuration, configuration hot reload, bundled load balancing and health checks, body transformations, Tyk importer.
+Distribution with declarative configuration, configuration hot reload, bundled load balancing and health checks, body transformations, importer for other gateway configuration formats.

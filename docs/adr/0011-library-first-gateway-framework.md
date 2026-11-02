@@ -7,7 +7,7 @@
 
 ## Context
 
-The project started from repeated limitations in Tyk caused by its opinionated model: limits apply only per key, rate-limit and quota policies cannot be defined separately because the lowest limit wins, and few rate-limit algorithms exist. The goal is to take the opposite approach: provide building blocks that could, together with extensions, replace such a product.
+The project started from repeated limitations of an existing API-management gateway, caused by its opinionated model: limits apply only per key, rate-limit and quota policies cannot be defined separately because the lowest limit wins, and few rate-limit algorithms exist. The goal is to take the opposite approach: provide building blocks that could, together with extensions, replace such a product.
 
 ADR-0001 described the core as minimal. That word was ambiguous: it could mean minimal features or minimal safety. The current code is a prototype for exploring interactions, not the intended shape.
 
@@ -25,11 +25,11 @@ Business policy is offered as **bundled extensions** maintained with the project
 
 A **distribution** is a runnable gateway assembled from the core and chosen extensions, with its own configuration format and operational defaults. Distributions consume the framework and are not part of it. A distribution, including declarative configuration and an extension registry, requires its own decision later.
 
-The project should be usable as open source. Replacing Tyk at work is a guiding use case, not a commitment; Tyk-format compatibility, if ever needed, belongs in a separate importer extension.
+The project should be usable as open source. Replacing an existing API-management gateway is a guiding use case, not a commitment; compatibility with another product's configuration format, if ever needed, belongs in a separate importer extension.
 
 ## Consequences
 
-**Positive:** Clear core boundary; the Tyk limitations become acceptance scenarios for extensions; bundled extensions continuously test the public API.
+**Positive:** Clear core boundary; the motivating limitations become acceptance scenarios for extensions; bundled extensions continuously test the public API.
 
 **Negative:** The core is larger than a bare proxy because it includes hardening (see ADR-0012). Users must assemble a binary until a distribution exists.
 
@@ -41,4 +41,4 @@ The project should be usable as open source. Replacing Tyk at work is a guiding 
 
 ## Validation / follow-up
 
-Each Tyk limitation listed above must be solvable by a bundled or user extension without changing core source. The prototype is replaced by a rewrite that uses the current tests as a behavior specification (see the [roadmap](../roadmap.md)).
+Each motivating limitation listed above must be solvable by a bundled or user extension without changing core source. The prototype is replaced by a rewrite that uses the current tests as a behavior specification (see the [roadmap](../roadmap.md)).

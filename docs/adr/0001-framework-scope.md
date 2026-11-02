@@ -6,9 +6,9 @@
 
 ## Context
 
-We want to explore building a Go HTTP API gateway with the potential to open-source it. Existing gateways such as Tyk provide opinionated models for API keys, customers, policies, quotas, and analytics. Those models are useful defaults but can constrain more specialized requirements, such as shared customer-level limits across many API keys.
+We want to explore building a Go HTTP API gateway with the potential to open-source it. Existing API-management gateways provide opinionated models for API keys, customers, policies, quotas, and analytics. Those models are useful defaults but can constrain more specialized requirements, such as shared customer-level limits across many API keys.
 
-Our immediate goal is a small and understandable gateway **scaffold**, not a feature-complete replacement for Tyk.
+Our immediate goal is a small and understandable gateway **scaffold**, not a feature-complete API-management product.
 
 ## Decision
 
@@ -28,7 +28,7 @@ The initial repository will contain a reusable Go package and a small executable
 
 **Positive:** Small public surface; domain-neutral; straightforward to reuse; good basis for testing different extensions.
 
-**Negative:** Users must assemble a binary and provide domain features themselves; initially less turnkey than Tyk; extension APIs still need careful design.
+**Negative:** Users must assemble a binary and provide domain features themselves; initially less turnkey than an API-management product; extension APIs still need careful design.
 
 ## Alternatives considered
 

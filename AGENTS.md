@@ -25,6 +25,8 @@ or change the glossary deliberately. Do not use the word.
 
 ## Security boundary
 
+- Read the [threat model](docs/threat-model.md) before you change a trust
+  boundary, and update it when a protection changes.
 - Check input validation, resource limits, timeouts, cancellation, shutdown,
   and memory growth. Do not let attacker-controlled input amplify work.
 - Keep protocol behavior RFC-compliant. Document each deliberate deviation.
