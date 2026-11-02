@@ -1,0 +1,144 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - canonicalheader
+    - govet
+    - gosec
+    - staticcheck
+    - ineffassign
+    - errcheck
+    - errorlint
+    - unused
+    - misspell
+    - nolintlint
+    - revive
+    - testableexamples
+    - thelper
+    - depguard
+    - errname
+    - exhaustive
+    - gocritic
+    - godoclint
+    - godot
+    - intrange
+    - modernize
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - noctx
+    - usestdlibvars
+    - usetesting
+  settings:
+    depguard:
+      rules:
+        # ADR-0014: the core uses the standard library and golang.org/x.
+        core:
+          files:
+            - "$all"
+            - "!$test"
+          allow:
+            - "$gostd"
+            - "golang.org/x"
+            - "example.com/go-gateway-starter"
+    exhaustive:
+      default-signifies-exhaustive: true
+    godoclint:
+      default: none
+      enable:
+        - pkg-doc
+        - single-pkg-doc
+        - require-pkg-doc
+        - start-with-name
+        - require-doc
+        - deprecated
+      options:
+        require-doc:
+          ignore-exported: false
+          ignore-unexported: false
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      severity: warning
+      confidence: 0.8
+      rules:
+        - name: blank-imports
+        - name: bool-literal-in-expr
+        - name: comment-spacings
+        - name: constant-logical-expr
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: datarace
+        - name: defer
+        - name: dot-imports
+        - name: duplicated-imports
+        - name: empty-block
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: get-return
+        - name: identical-branches
+        - name: identical-ifelseif-branches
+        - name: identical-ifelseif-conditions
+        - name: identical-switch-conditions
+        - name: if-return
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: range-val-address
+        - name: range-val-in-closure
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: redundant-import-alias
+        - name: string-of-int
+        - name: struct-tag
+        - name: superfluous-else
+        - name: time-equal
+        - name: unchecked-type-assertion
+        - name: unconditional-recursion
+        - name: unexported-return
+        - name: unreachable-code
+        - name: unused-parameter
+        - name: useless-break
+        - name: useless-fallthrough
+        - name: var-declaration
+        - name: var-naming
+        - name: waitgroup-by-value
+
+  exclusions:
+    rules:
+      # Test clients do not need request contexts. Test names document tests.
+      - path: _test\.go
+        linters:
+          - godoclint
+          - noctx
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      extra-rules: true
+    goimports:
+      local-prefixes:
+        - example.com/go-gateway-starter
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # The prototype is replaced, not fixed. Report only code changed after this
+  # commit. Remove this setting when the rewrite has replaced the prototype.
+  new-from-rev: 98288351be92163cb8807c01a39ad0d46372d374

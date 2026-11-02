@@ -20,9 +20,8 @@ or change the glossary deliberately. Do not use the word.
   rate limits, quotas, billing, or storage schemas.
 - Bundled extensions MUST use only the public contract. If a feature needs a
   core change or private access, the public contract has a gap. Report it.
-- The core uses the standard library. `golang.org/x` is acceptable. Any other
-  dependency needs a clear reason and approval. Do not export types from
-  external packages.
+- A new dependency needs a clear reason and approval. Do not export types
+  from external packages.
 
 ## Security boundary
 
@@ -58,11 +57,11 @@ or change the glossary deliberately. Do not use the word.
   (ASD-STE100).
 - Comments explain why: a constraint, an invariant, or a spec reference.
   Describe the code as it is, not the change, the fixed bug, or the callers.
-- Each exported identifier has a complete GoDoc: what it does, when to use
+- The GoDoc of an exported identifier is complete: what it does, when to use
   it, and its contract. The contract includes concurrency safety, ownership
   and lifetime of values, errors, and security implications.
 - Show the main entry points with testable `Example` functions.
-- Each unexported identifier has a one-sentence GoDoc. State what the name
+- The GoDoc of an unexported identifier is one sentence. State what the name
   does not show: a precondition, an invariant, a side effect, or why it
   exists. Do not describe how it works. If the name already says everything,
   write one plain sentence.
@@ -83,7 +82,7 @@ or change the glossary deliberately. Do not use the word.
 When you finish, report:
 
 1. The exact commands that you ran, and their results. The minimum is
-   `go vet ./...` and `go test -race ./...`.
+   `nix develop -c just check`.
 2. The trust-boundary impact, even when it is none.
 3. The risks to correctness, security, and compatibility.
 4. What you did not verify, and why.
