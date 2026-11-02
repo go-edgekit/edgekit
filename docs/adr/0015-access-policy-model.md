@@ -6,7 +6,7 @@
 
 ## Context
 
-In Tyk, limits apply only per key, so a customer with several keys cannot share a limit. Rate-limit and quota policies cannot be defined separately because the lowest limit wins. The bundled access-policy extensions must avoid both problems without adding policy terms to the core. Terms are defined in the [access-policy glossary](../../extensions/policy/CONTEXT.md).
+In the gateway that motivated this project, limits apply only per key, so a customer with several keys cannot share a limit. Rate-limit and quota policies cannot be defined separately because the lowest limit wins. The bundled access-policy extensions must avoid both problems without adding policy terms to the core. Terms are defined in the [access-policy glossary](../../extensions/policy/CONTEXT.md).
 
 ## Decision
 

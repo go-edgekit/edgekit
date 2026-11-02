@@ -25,4 +25,4 @@ The module path changes from `example.com/go-gateway-starter` to a real public p
 ## Alternatives considered
 
 - **One module with all dependencies:** Simple releases, heavy core.
-- **A core key-value store interface:** Repeats the Tyk model of one shared store for everything and cannot fit each extension's consistency needs.
+- **A core key-value store interface:** Repeats the model of one shared store for everything and cannot fit each extension's consistency needs.

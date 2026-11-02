@@ -7,7 +7,7 @@
 
 ## Context
 
-The project started from repeated limitations in Tyk caused by its opinionated model: limits apply only per key, rate-limit and quota policies cannot be defined separately because the lowest limit wins, and few rate-limit algorithms exist. The goal is to take the opposite approach: provide building blocks that could, together with extensions, replace such a product.
+The project started from repeated limitations of an existing API-management gateway, caused by its opinionated model: limits apply only per key, rate-limit and quota policies cannot be defined separately because the lowest limit wins, and few rate-limit algorithms exist. The goal is to take the opposite approach: provide building blocks that could, together with extensions, replace such a product.
 
 ADR-0001 described the core as minimal. That word was ambiguous: it could mean minimal features or minimal safety. The current code is a prototype for exploring interactions, not the intended shape.
 
@@ -29,7 +29,7 @@ The project should be usable as open source. Replacing an existing API-managemen
 
 ## Consequences
 
-**Positive:** Clear core boundary; the Tyk limitations become acceptance scenarios for extensions; bundled extensions continuously test the public API.
+**Positive:** Clear core boundary; the motivating limitations become acceptance scenarios for extensions; bundled extensions continuously test the public API.
 
 **Negative:** The core is larger than a bare proxy because it includes hardening (see ADR-0012). Users must assemble a binary until a distribution exists.
 
@@ -41,4 +41,4 @@ The project should be usable as open source. Replacing an existing API-managemen
 
 ## Validation / follow-up
 
-Each Tyk limitation listed above must be solvable by a bundled or user extension without changing core source. The prototype is replaced by a rewrite that uses the current tests as a behavior specification (see the [roadmap](../roadmap.md)).
+Each motivating limitation listed above must be solvable by a bundled or user extension without changing core source. The prototype is replaced by a rewrite that uses the current tests as a behavior specification (see the [roadmap](../roadmap.md)).

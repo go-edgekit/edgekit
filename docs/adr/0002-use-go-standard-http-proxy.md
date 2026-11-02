@@ -6,7 +6,7 @@
 
 ## Context
 
-HTTP reverse proxies are deceptively complex. The gateway must forward requests correctly, handle cancellation and streaming, manage connection reuse, and avoid reproducing subtle HTTP security and protocol behavior. Tyk's custom reverse-proxy implementation illustrates how such code can grow over time. Pingora offers a purpose-built proxy framework, but is written in Rust.
+HTTP reverse proxies are deceptively complex. The gateway must forward requests correctly, handle cancellation and streaming, manage connection reuse, and avoid reproducing subtle HTTP security and protocol behavior. Forked reverse-proxy implementations in other gateways show how such code can grow over time. Pingora offers a purpose-built proxy framework, but is written in Rust.
 
 ## Decision
 
