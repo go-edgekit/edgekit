@@ -4,7 +4,7 @@ default:
   @just --list
 
 # Run all checks that CI runs.
-check: lint actionlint test race vet tidy-check
+check: lint actionlint zizmor test race vet tidy-check
 
 fmt:
   golangci-lint fmt
@@ -29,3 +29,6 @@ security:
 
 actionlint:
   actionlint
+
+zizmor:
+  zizmor --collect=all .

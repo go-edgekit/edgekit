@@ -34,6 +34,7 @@
               golangci-lint
               govulncheck
               just
+              zizmor
             ];
           };
         }
