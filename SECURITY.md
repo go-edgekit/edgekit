@@ -19,6 +19,9 @@ library in your binary. Rebuild with the patched toolchain.
 
 ## Scope
 
+The [threat model](docs/threat-model.md) describes the actors, trust
+boundaries, and protections.
+
 Report issues that can affect the safety of a gateway built with edgekit, for
 example:
 
