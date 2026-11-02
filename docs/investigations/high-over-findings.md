@@ -4,7 +4,7 @@
 
 ## Summary
 
-The [gateway survey](high-over.md) supports our current direction: a small programmable Go proxy framework, not a smaller API-management platform. Its most useful findings concern extension boundaries, configuration ownership, and runtime safety.
+An earlier gateway survey supports our current direction: a small programmable Go proxy framework, not a smaller API-management platform. Its most useful findings concern extension boundaries, configuration ownership, and runtime safety. The survey is no longer in the repository, because its sources cannot be checked (see [Evidence limits](#evidence-limits)). This assessment keeps the findings that the project uses.
 
 Its recommended release scope and API sketches should not be adopted as a package. They move toward a turnkey gateway distribution and introduce abstractions that our scaffold does not yet need.
 
@@ -100,14 +100,14 @@ If external processing becomes necessary, design timeouts and fail-open/fail-clo
 2. Select one concrete extension experiment for missing boundaries. An outbound-signing extension is a candidate: test route-derived state and access to the actual rewritten request before transport execution. Changing an inbound header does not validate that boundary. Fallible outbound work also needs more than `ReverseProxy.Rewrite`, which cannot return an error.
 3. Run a focused proxy-hardening pass without adding business features just to create test scenarios.
 4. Keep distribution features separate from framework requirements: file configuration, built-in policies, reload, and management APIs remain deferred possibilities, not committed milestones.
-5. Repair the survey's source references before relying on product-specific claims for a decision.
+5. Do not use the survey's product-specific claims for a decision. Check them against primary sources first.
 
 These are follow-up recommendations, not newly accepted ADRs or commitments to implement every listed capability.
 
 ## Evidence limits
 
-The survey contains citation markers such as `turn…search…`, but no corresponding source URLs or bibliography. Product-specific claims, licenses, and extension details are therefore not auditable from the checked-in document and were not independently verified in this assessment.
+The survey had citation markers, but no source URLs or bibliography. Its product-specific claims, licenses, and extension details were therefore not auditable and were not independently verified in this assessment.
 
 Its warning that vendor throughput figures are not directly comparable is appropriate. Those figures do not establish a performance target for this project. The stated 90%/9% extension split is explicitly a design target, not measured industry evidence.
 
-Use the survey as architectural context. Use our experiments to establish local behavior, and representative benchmarks and security tests to assess future operational claims.
+Use these findings as architectural context. Use our experiments to establish local behavior, and representative benchmarks and security tests to assess future operational claims.

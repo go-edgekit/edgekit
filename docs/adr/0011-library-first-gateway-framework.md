@@ -25,7 +25,7 @@ Business policy is offered as **bundled extensions** maintained with the project
 
 A **distribution** is a runnable gateway assembled from the core and chosen extensions, with its own configuration format and operational defaults. Distributions consume the framework and are not part of it. A distribution, including declarative configuration and an extension registry, requires its own decision later.
 
-The project should be usable as open source. Replacing Tyk at work is a guiding use case, not a commitment; Tyk-format compatibility, if ever needed, belongs in a separate importer extension.
+The project should be usable as open source. Replacing an existing API-management gateway is a guiding use case, not a commitment; compatibility with another product's configuration format, if ever needed, belongs in a separate importer extension.
 
 ## Consequences
 
