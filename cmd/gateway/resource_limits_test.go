@@ -13,15 +13,15 @@ import (
 	"testing"
 	"time"
 
-	gateway "example.com/go-gateway-starter"
+	"github.com/go-edgekit/edgekit"
 )
 
 func TestInboundHeaderLimitRejectsBeforeGatewayEntry(t *testing.T) {
 	var entered, completed atomic.Int32
 	target, _ := url.Parse("http://unused.test")
-	app, err := gateway.NewWithConfig(gateway.Config{
-		Routes: []gateway.Route{{Prefix: "/api/", Upstream: target}},
-		Middlewares: []gateway.Middleware{func(http.Handler) http.Handler {
+	app, err := edgekit.NewWithConfig(edgekit.Config{
+		Routes: []edgekit.Route{{Prefix: "/api/", Upstream: target}},
+		Middlewares: []edgekit.Middleware{func(http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				entered.Add(1)
 				if _, err := io.Copy(io.Discard, r.Body); err != nil {
@@ -30,7 +30,7 @@ func TestInboundHeaderLimitRejectsBeforeGatewayEntry(t *testing.T) {
 				w.WriteHeader(http.StatusNoContent)
 			})
 		}},
-		Extensions: []any{completionObserver(func(gateway.Outcome) { completed.Add(1) })},
+		Extensions: []any{completionObserver(func(edgekit.Outcome) { completed.Add(1) })},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestInboundHeaderLimitRejectsBeforeGatewayEntry(t *testing.T) {
 
 type responseObserver func(*http.Response) error
 
-func (f responseObserver) OnUpstreamResponse(_ context.Context, _ *gateway.RequestContext, response *http.Response) error {
+func (f responseObserver) OnUpstreamResponse(_ context.Context, _ *edgekit.RequestContext, response *http.Response) error {
 	return f(response)
 }
 
@@ -114,12 +114,12 @@ func TestUpstreamHeaderLimitBeforeResponseHooks(t *testing.T) {
 			defer transport.CloseIdleConnections()
 			target, _ := url.Parse(upstream.URL)
 			responses := 0
-			var outcome gateway.Outcome
-			app, err := gateway.NewWithConfig(gateway.Config{
-				Routes: []gateway.Route{{Prefix: "/api/", Upstream: target}}, Transport: transport,
+			var outcome edgekit.Outcome
+			app, err := edgekit.NewWithConfig(edgekit.Config{
+				Routes: []edgekit.Route{{Prefix: "/api/", Upstream: target}}, Transport: transport,
 				Extensions: []any{
 					responseObserver(func(*http.Response) error { responses++; return nil }),
-					completionObserver(func(got gateway.Outcome) { outcome = got }),
+					completionObserver(func(got edgekit.Outcome) { outcome = got }),
 				},
 			})
 			if err != nil {

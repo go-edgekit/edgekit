@@ -1,4 +1,4 @@
-package gateway_test
+package edgekit_test
 
 import (
 	"context"
@@ -15,51 +15,51 @@ import (
 	"testing"
 	"time"
 
-	gateway "example.com/go-gateway-starter"
-	"example.com/go-gateway-starter/extensions/requesttag"
+	"github.com/go-edgekit/edgekit"
+	"github.com/go-edgekit/edgekit/extensions/requesttag"
 )
 
 type testExtension struct {
-	request  func(context.Context, *gateway.RequestContext, *http.Request) error
-	outbound func(context.Context, *gateway.RequestContext, *http.Request) error
-	response func(context.Context, *gateway.RequestContext, *http.Response) error
-	complete func(context.Context, *gateway.RequestContext, gateway.Outcome)
+	request  func(context.Context, *edgekit.RequestContext, *http.Request) error
+	outbound func(context.Context, *edgekit.RequestContext, *http.Request) error
+	response func(context.Context, *edgekit.RequestContext, *http.Response) error
+	complete func(context.Context, *edgekit.RequestContext, edgekit.Outcome)
 }
 
-func (e *testExtension) OnRequest(ctx context.Context, rc *gateway.RequestContext, r *http.Request) error {
+func (e *testExtension) OnRequest(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) error {
 	if e.request != nil {
 		return e.request(ctx, rc, r)
 	}
 	return nil
 }
 
-func (e *testExtension) OnBeforeUpstream(ctx context.Context, rc *gateway.RequestContext, r *http.Request) error {
+func (e *testExtension) OnBeforeUpstream(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) error {
 	if e.outbound != nil {
 		return e.outbound(ctx, rc, r)
 	}
 	return nil
 }
 
-func (e *testExtension) OnUpstreamResponse(ctx context.Context, rc *gateway.RequestContext, r *http.Response) error {
+func (e *testExtension) OnUpstreamResponse(ctx context.Context, rc *edgekit.RequestContext, r *http.Response) error {
 	if e.response != nil {
 		return e.response(ctx, rc, r)
 	}
 	return nil
 }
 
-func (e *testExtension) OnComplete(ctx context.Context, rc *gateway.RequestContext, outcome gateway.Outcome) {
+func (e *testExtension) OnComplete(ctx context.Context, rc *edgekit.RequestContext, outcome edgekit.Outcome) {
 	if e.complete != nil {
 		e.complete(ctx, rc, outcome)
 	}
 }
 
-func testRoute(t *testing.T, address string) gateway.Route {
+func testRoute(t *testing.T, address string) edgekit.Route {
 	t.Helper()
 	target, err := url.Parse(address)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return gateway.Route{Prefix: "/api/", Upstream: target}
+	return edgekit.Route{Prefix: "/api/", Upstream: target}
 }
 
 func TestLifecycleContextAndOrder(t *testing.T) {
@@ -70,18 +70,18 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 	defer upstream.Close()
 
 	type contextKey struct{}
-	key := gateway.NewStateKey[string]()
-	var shared *gateway.RequestContext
+	key := edgekit.NewStateKey[string]()
+	var shared *edgekit.RequestContext
 	var steps []string
-	check := func(ctx context.Context, rc *gateway.RequestContext) {
+	check := func(ctx context.Context, rc *edgekit.RequestContext) {
 		t.Helper()
-		fromContext, ok := gateway.FromContext(ctx)
+		fromContext, ok := edgekit.FromContext(ctx)
 		if !ok || fromContext != shared || rc != shared {
 			t.Fatal("gateway context identity changed")
 		}
 	}
 	first := &testExtension{
-		request: func(ctx context.Context, rc *gateway.RequestContext, r *http.Request) error {
+		request: func(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) error {
 			check(ctx, rc)
 			if ctx.Value(contextKey{}) != "derived" || r.Context() != ctx {
 				t.Fatal("request hook did not receive the middleware context")
@@ -89,18 +89,18 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 			if _, ok := rc.RoutePrefix(); ok {
 				t.Fatal("route matched before request hook")
 			}
-			if value, ok := gateway.GetState(rc, key); !ok || value != "entered" {
+			if value, ok := edgekit.GetState(rc, key); !ok || value != "entered" {
 				t.Fatal("middleware state missing")
 			}
 			steps = append(steps, "request:first")
 			return nil
 		},
-		outbound: func(ctx context.Context, rc *gateway.RequestContext, r *http.Request) error {
+		outbound: func(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) error {
 			check(ctx, rc)
 			if ctx.Value(contextKey{}) != "derived" || r.Context() != ctx {
 				t.Fatal("outbound hook lost the execution context")
 			}
-			if value, _ := gateway.GetState(rc, key); value != "route entered" {
+			if value, _ := edgekit.GetState(rc, key); value != "route entered" {
 				t.Fatal("outbound hook ran before route middleware established state")
 			}
 			if prefix, ok := rc.RoutePrefix(); !ok || prefix != "/api/" {
@@ -113,7 +113,7 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 			steps = append(steps, "outbound:first")
 			return nil
 		},
-		response: func(ctx context.Context, rc *gateway.RequestContext, response *http.Response) error {
+		response: func(ctx context.Context, rc *edgekit.RequestContext, response *http.Response) error {
 			check(ctx, rc)
 			if ctx.Value(contextKey{}) != "derived" {
 				t.Fatal("outbound context lost middleware values")
@@ -133,12 +133,12 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 			steps = append(steps, "response:first")
 			return nil
 		},
-		complete: func(ctx context.Context, rc *gateway.RequestContext, outcome gateway.Outcome) {
+		complete: func(ctx context.Context, rc *edgekit.RequestContext, outcome edgekit.Outcome) {
 			check(ctx, rc)
 			if ctx.Value(contextKey{}) != nil {
 				t.Fatal("completion should receive gateway entry context")
 			}
-			if value, _ := gateway.GetState(rc, key); value != "unwound" {
+			if value, _ := edgekit.GetState(rc, key); value != "unwound" {
 				t.Fatal("completion ran before middleware unwound")
 			}
 			if outcome.Err != nil || outcome.Aborted || outcome.Duration <= 0 {
@@ -148,60 +148,60 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 		},
 	}
 	second := &testExtension{
-		request: func(context.Context, *gateway.RequestContext, *http.Request) error {
+		request: func(context.Context, *edgekit.RequestContext, *http.Request) error {
 			steps = append(steps, "request:second")
 			return nil
 		},
-		outbound: func(_ context.Context, _ *gateway.RequestContext, r *http.Request) error {
+		outbound: func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) error {
 			if r.Header.Get("X-Outbound") != "first" {
 				t.Fatal("outbound hooks ran out of order")
 			}
 			steps = append(steps, "outbound:second")
 			return nil
 		},
-		response: func(_ context.Context, _ *gateway.RequestContext, response *http.Response) error {
+		response: func(_ context.Context, _ *edgekit.RequestContext, response *http.Response) error {
 			if response.Header.Get("X-Upstream") != "modified" {
 				t.Fatal("response hooks ran out of order")
 			}
 			steps = append(steps, "response:second")
 			return nil
 		},
-		complete: func(context.Context, *gateway.RequestContext, gateway.Outcome) {
+		complete: func(context.Context, *edgekit.RequestContext, edgekit.Outcome) {
 			steps = append(steps, "complete:second")
 		},
 	}
 	global := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var ok bool
-			shared, ok = gateway.FromContext(r.Context())
+			shared, ok = edgekit.FromContext(r.Context())
 			if !ok || shared.StartedAt().IsZero() || shared.StartedAt().After(time.Now()) {
 				t.Fatal("context not initialized before global middleware")
 			}
-			gateway.SetState(shared, key, "entered")
+			edgekit.SetState(shared, key, "entered")
 			steps = append(steps, "global:before")
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), contextKey{}, "derived")))
-			gateway.SetState(shared, key, "unwound")
+			edgekit.SetState(shared, key, "unwound")
 			steps = append(steps, "global:after")
 		})
 	}
 	route := testRoute(t, upstream.URL)
-	route.Middlewares = []gateway.Middleware{func(next http.Handler) http.Handler {
+	route.Middlewares = []edgekit.Middleware{func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			rc, _ := gateway.FromContext(r.Context())
+			rc, _ := edgekit.FromContext(r.Context())
 			if prefix, ok := rc.RoutePrefix(); !ok || prefix != "/api/" {
 				t.Fatal("route metadata missing before route middleware")
 			}
 			if _, ok := rc.Upstream(); ok {
 				t.Fatal("proxy began before route middleware")
 			}
-			gateway.SetState(rc, key, "route entered")
+			edgekit.SetState(rc, key, "route entered")
 			steps = append(steps, "route:before")
 			next.ServeHTTP(w, r)
 			steps = append(steps, "route:after")
 		})
 	}}
-	app, err := gateway.NewWithConfig(gateway.Config{
-		Routes: []gateway.Route{route}, Middlewares: []gateway.Middleware{global}, Extensions: []any{first, second},
+	app, err := edgekit.NewWithConfig(edgekit.Config{
+		Routes: []edgekit.Route{route}, Middlewares: []edgekit.Middleware{global}, Extensions: []any{first, second},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -242,24 +242,24 @@ func TestCompletionOnEarlyExits(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var requestRan, unwound bool
 			completions := 0
-			denial := &gateway.HTTPError{StatusCode: 429, Message: "slow down"}
+			denial := &edgekit.HTTPError{StatusCode: 429, Message: "slow down"}
 			extension := &testExtension{
-				request: func(context.Context, *gateway.RequestContext, *http.Request) error {
+				request: func(context.Context, *edgekit.RequestContext, *http.Request) error {
 					requestRan = true
 					if tc.hookDeny {
 						return fmt.Errorf("policy: %w", denial)
 					}
 					return nil
 				},
-				outbound: func(context.Context, *gateway.RequestContext, *http.Request) error {
+				outbound: func(context.Context, *edgekit.RequestContext, *http.Request) error {
 					t.Fatal("outbound hook ran for a local response")
 					return nil
 				},
-				response: func(context.Context, *gateway.RequestContext, *http.Response) error {
+				response: func(context.Context, *edgekit.RequestContext, *http.Response) error {
 					t.Fatal("response hook ran for a local response")
 					return nil
 				},
-				complete: func(_ context.Context, rc *gateway.RequestContext, outcome gateway.Outcome) {
+				complete: func(_ context.Context, rc *edgekit.RequestContext, outcome edgekit.Outcome) {
 					completions++
 					if !unwound || outcome.Aborted {
 						t.Fatal("completion did not follow normal middleware exit")
@@ -287,12 +287,12 @@ func TestCompletionOnEarlyExits(t *testing.T) {
 			}
 			route := testRoute(t, "http://unused.invalid")
 			if tc.routeDeny {
-				route.Middlewares = []gateway.Middleware{func(http.Handler) http.Handler {
+				route.Middlewares = []edgekit.Middleware{func(http.Handler) http.Handler {
 					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "forbidden", 403) })
 				}}
 			}
-			app, err := gateway.NewWithConfig(gateway.Config{
-				Routes: []gateway.Route{route}, Middlewares: []gateway.Middleware{global}, Extensions: []any{extension},
+			app, err := edgekit.NewWithConfig(edgekit.Config{
+				Routes: []edgekit.Route{route}, Middlewares: []edgekit.Middleware{global}, Extensions: []any{extension},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -315,8 +315,8 @@ func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
 			message string
 		}{
 			{name: "internal", err: errors.New("secret database details")},
-			{name: "rejection", err: &gateway.HTTPError{StatusCode: 403, Message: "denied"}, status: 403, message: "denied\n"},
-			{name: "invalid rejection", err: &gateway.HTTPError{StatusCode: 200, Message: "secret details"}, status: 500, message: "Internal Server Error\n"},
+			{name: "rejection", err: &edgekit.HTTPError{StatusCode: 403, Message: "denied"}, status: 403, message: "denied\n"},
+			{name: "invalid rejection", err: &edgekit.HTTPError{StatusCode: 200, Message: "secret details"}, status: 500, message: "Internal Server Error\n"},
 		} {
 			t.Run(phase+"/"+tc.name, func(t *testing.T) {
 				var received atomic.Int32
@@ -328,37 +328,37 @@ func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
 				defer upstream.Close()
 				first, second := &testExtension{}, &testExtension{}
 				if phase == "request" {
-					first.request = func(context.Context, *gateway.RequestContext, *http.Request) error { return tc.err }
-					second.request = func(context.Context, *gateway.RequestContext, *http.Request) error {
+					first.request = func(context.Context, *edgekit.RequestContext, *http.Request) error { return tc.err }
+					second.request = func(context.Context, *edgekit.RequestContext, *http.Request) error {
 						t.Fatal("later request hook ran after error")
 						return nil
 					}
 				} else if phase == "outbound" {
-					first.outbound = func(context.Context, *gateway.RequestContext, *http.Request) error { return tc.err }
-					second.outbound = func(context.Context, *gateway.RequestContext, *http.Request) error {
+					first.outbound = func(context.Context, *edgekit.RequestContext, *http.Request) error { return tc.err }
+					second.outbound = func(context.Context, *edgekit.RequestContext, *http.Request) error {
 						t.Fatal("later outbound hook ran after error")
 						return nil
 					}
-					second.response = func(context.Context, *gateway.RequestContext, *http.Response) error {
+					second.response = func(context.Context, *edgekit.RequestContext, *http.Response) error {
 						t.Fatal("response hook ran after outbound failure")
 						return nil
 					}
 				} else {
-					first.response = func(context.Context, *gateway.RequestContext, *http.Response) error { return tc.err }
-					second.response = func(context.Context, *gateway.RequestContext, *http.Response) error {
+					first.response = func(context.Context, *edgekit.RequestContext, *http.Response) error { return tc.err }
+					second.response = func(context.Context, *edgekit.RequestContext, *http.Response) error {
 						t.Fatal("later response hook ran after error")
 						return nil
 					}
 				}
 				completed := false
-				second.complete = func(_ context.Context, _ *gateway.RequestContext, outcome gateway.Outcome) {
+				second.complete = func(_ context.Context, _ *edgekit.RequestContext, outcome edgekit.Outcome) {
 					completed = true
 					if !errors.Is(outcome.Err, tc.err) || outcome.Aborted {
 						t.Fatalf("unexpected error outcome: %+v", outcome)
 					}
 				}
-				app, err := gateway.NewWithConfig(gateway.Config{
-					Routes: []gateway.Route{testRoute(t, upstream.URL)}, Extensions: []any{first, second},
+				app, err := edgekit.NewWithConfig(edgekit.Config{
+					Routes: []edgekit.Route{testRoute(t, upstream.URL)}, Extensions: []any{first, second},
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -392,7 +392,7 @@ func TestTransportErrorReachesCompletion(t *testing.T) {
 	upstream := httptest.NewServer(http.NotFoundHandler())
 	upstream.Close()
 	completed := false
-	extension := &testExtension{complete: func(_ context.Context, rc *gateway.RequestContext, outcome gateway.Outcome) {
+	extension := &testExtension{complete: func(_ context.Context, rc *edgekit.RequestContext, outcome edgekit.Outcome) {
 		completed = true
 		if outcome.Err == nil || outcome.Aborted {
 			t.Fatalf("unexpected transport outcome: %+v", outcome)
@@ -401,7 +401,7 @@ func TestTransportErrorReachesCompletion(t *testing.T) {
 			t.Fatal("missing attempted upstream")
 		}
 	}}
-	app, err := gateway.NewWithConfig(gateway.Config{Routes: []gateway.Route{testRoute(t, upstream.URL)}, Extensions: []any{extension}})
+	app, err := edgekit.NewWithConfig(edgekit.Config{Routes: []edgekit.Route{testRoute(t, upstream.URL)}, Extensions: []any{extension}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +416,7 @@ func TestCompletionDuringPanicUnwinding(t *testing.T) {
 	for _, panicValue := range []any{"middleware panic", http.ErrAbortHandler} {
 		t.Run(fmt.Sprint(panicValue), func(t *testing.T) {
 			var unwound, completed bool
-			extension := &testExtension{complete: func(_ context.Context, _ *gateway.RequestContext, outcome gateway.Outcome) {
+			extension := &testExtension{complete: func(_ context.Context, _ *edgekit.RequestContext, outcome edgekit.Outcome) {
 				completed = true
 				if !unwound || !outcome.Aborted {
 					t.Fatal("completion did not observe panic unwinding")
@@ -428,9 +428,9 @@ func TestCompletionDuringPanicUnwinding(t *testing.T) {
 					panic(panicValue)
 				})
 			}
-			app, err := gateway.NewWithConfig(gateway.Config{
-				Routes:      []gateway.Route{testRoute(t, "http://unused.invalid")},
-				Middlewares: []gateway.Middleware{middleware}, Extensions: []any{extension},
+			app, err := edgekit.NewWithConfig(edgekit.Config{
+				Routes:      []edgekit.Route{testRoute(t, "http://unused.invalid")},
+				Middlewares: []edgekit.Middleware{middleware}, Extensions: []any{extension},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -457,13 +457,13 @@ func TestStreamingFailureAbortsAndCompletes(t *testing.T) {
 	}))
 	defer upstream.Close()
 	completed := false
-	extension := &testExtension{complete: func(_ context.Context, _ *gateway.RequestContext, outcome gateway.Outcome) {
+	extension := &testExtension{complete: func(_ context.Context, _ *edgekit.RequestContext, outcome edgekit.Outcome) {
 		completed = true
 		if !outcome.Aborted {
 			t.Fatal("streaming failure was reported as normal completion")
 		}
 	}}
-	app, err := gateway.NewWithConfig(gateway.Config{Routes: []gateway.Route{testRoute(t, upstream.URL)}, Extensions: []any{extension}})
+	app, err := edgekit.NewWithConfig(edgekit.Config{Routes: []edgekit.Route{testRoute(t, upstream.URL)}, Extensions: []any{extension}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,8 +490,8 @@ func TestRequestTagExtension(t *testing.T) {
 	defer upstream.Close()
 	var records []requesttag.Record
 	tag := requesttag.New("example", func(record requesttag.Record) { records = append(records, record) })
-	app, err := gateway.NewWithConfig(gateway.Config{
-		Routes: []gateway.Route{testRoute(t, upstream.URL)}, Middlewares: []gateway.Middleware{tag.Middleware}, Extensions: []any{tag},
+	app, err := edgekit.NewWithConfig(edgekit.Config{
+		Routes: []edgekit.Route{testRoute(t, upstream.URL)}, Middlewares: []edgekit.Middleware{tag.Middleware}, Extensions: []any{tag},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -515,47 +515,47 @@ func TestRequestTagExtension(t *testing.T) {
 }
 
 func TestTypedStateIsolationAndNilValues(t *testing.T) {
-	var rc gateway.RequestContext
-	first, second := gateway.NewStateKey[string](), gateway.NewStateKey[string]()
+	var rc edgekit.RequestContext
+	first, second := edgekit.NewStateKey[string](), edgekit.NewStateKey[string]()
 	if first == second {
 		t.Fatal("distinct state keys have equal identities")
 	}
-	gateway.SetState(&rc, first, "first")
-	gateway.SetState(&rc, second, "second")
-	if value, ok := gateway.GetState(&rc, first); !ok || value != "first" {
+	edgekit.SetState(&rc, first, "first")
+	edgekit.SetState(&rc, second, "second")
+	if value, ok := edgekit.GetState(&rc, first); !ok || value != "first" {
 		t.Fatal("first key overwritten")
 	}
-	if value, ok := gateway.GetState(&rc, second); !ok || value != "second" {
+	if value, ok := edgekit.GetState(&rc, second); !ok || value != "second" {
 		t.Fatal("second key missing")
 	}
-	nilKey := gateway.NewStateKey[any]()
-	if _, ok := gateway.GetState(&rc, nilKey); ok {
+	nilKey := edgekit.NewStateKey[any]()
+	if _, ok := edgekit.GetState(&rc, nilKey); ok {
 		t.Fatal("missing key reported present")
 	}
-	gateway.SetState(&rc, nilKey, nil)
-	if value, ok := gateway.GetState(&rc, nilKey); !ok || value != nil {
+	edgekit.SetState(&rc, nilKey, nil)
+	if value, ok := edgekit.GetState(&rc, nilKey); !ok || value != nil {
 		t.Fatal("stored nil was not preserved")
 	}
-	other := new(gateway.RequestContext)
-	if _, ok := gateway.GetState(other, first); ok {
+	other := new(edgekit.RequestContext)
+	if _, ok := edgekit.GetState(other, first); ok {
 		t.Fatal("state leaked across request contexts")
 	}
-	if _, ok := gateway.FromContext(context.Background()); ok {
+	if _, ok := edgekit.FromContext(context.Background()); ok {
 		t.Fatal("unexpected context outside gateway")
 	}
 }
 
 func TestConcurrentRequestStateIsolation(t *testing.T) {
-	key := gateway.NewStateKey[string]()
+	key := edgekit.NewStateKey[string]()
 	var mu sync.Mutex
 	seen := make(map[string]bool)
 	extension := &testExtension{
-		request: func(_ context.Context, rc *gateway.RequestContext, r *http.Request) error {
-			gateway.SetState(rc, key, r.Header.Get("X-Test-Request"))
-			return &gateway.HTTPError{StatusCode: 403, Message: "local response"}
+		request: func(_ context.Context, rc *edgekit.RequestContext, r *http.Request) error {
+			edgekit.SetState(rc, key, r.Header.Get("X-Test-Request"))
+			return &edgekit.HTTPError{StatusCode: 403, Message: "local response"}
 		},
-		complete: func(_ context.Context, rc *gateway.RequestContext, _ gateway.Outcome) {
-			value, ok := gateway.GetState(rc, key)
+		complete: func(_ context.Context, rc *edgekit.RequestContext, _ edgekit.Outcome) {
+			value, ok := edgekit.GetState(rc, key)
 			mu.Lock()
 			defer mu.Unlock()
 			if !ok || seen[value] {
@@ -564,7 +564,7 @@ func TestConcurrentRequestStateIsolation(t *testing.T) {
 			seen[value] = true
 		},
 	}
-	app, err := gateway.NewWithConfig(gateway.Config{Routes: []gateway.Route{testRoute(t, "http://unused.invalid")}, Extensions: []any{extension}})
+	app, err := edgekit.NewWithConfig(edgekit.Config{Routes: []edgekit.Route{testRoute(t, "http://unused.invalid")}, Extensions: []any{extension}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,17 +589,17 @@ func TestCancellationReachesHooks(t *testing.T) {
 	cancel()
 	completed := false
 	extension := &testExtension{
-		request: func(ctx context.Context, _ *gateway.RequestContext, _ *http.Request) error {
+		request: func(ctx context.Context, _ *edgekit.RequestContext, _ *http.Request) error {
 			return ctx.Err()
 		},
-		complete: func(ctx context.Context, _ *gateway.RequestContext, outcome gateway.Outcome) {
+		complete: func(ctx context.Context, _ *edgekit.RequestContext, outcome edgekit.Outcome) {
 			completed = true
 			if ctx.Err() != context.Canceled || !errors.Is(outcome.Err, context.Canceled) {
 				t.Fatal("cancellation was lost")
 			}
 		},
 	}
-	app, err := gateway.NewWithConfig(gateway.Config{Routes: []gateway.Route{testRoute(t, "http://unused.invalid")}, Extensions: []any{extension}})
+	app, err := edgekit.NewWithConfig(edgekit.Config{Routes: []edgekit.Route{testRoute(t, "http://unused.invalid")}, Extensions: []any{extension}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,14 +613,14 @@ func TestCompletionOnOutboundPanic(t *testing.T) {
 	unwound := false
 	completions := 0
 	extension := &testExtension{
-		outbound: func(context.Context, *gateway.RequestContext, *http.Request) error {
+		outbound: func(context.Context, *edgekit.RequestContext, *http.Request) error {
 			panic("signing panic")
 		},
-		response: func(context.Context, *gateway.RequestContext, *http.Response) error {
+		response: func(context.Context, *edgekit.RequestContext, *http.Response) error {
 			t.Fatal("response hook ran after outbound panic")
 			return nil
 		},
-		complete: func(_ context.Context, rc *gateway.RequestContext, outcome gateway.Outcome) {
+		complete: func(_ context.Context, rc *edgekit.RequestContext, outcome edgekit.Outcome) {
 			completions++
 			if !unwound || !outcome.Aborted || outcome.Err != nil {
 				t.Fatalf("unexpected panic outcome: unwound=%v outcome=%+v", unwound, outcome)
@@ -631,13 +631,13 @@ func TestCompletionOnOutboundPanic(t *testing.T) {
 		},
 	}
 	route := testRoute(t, "http://unused.invalid")
-	route.Middlewares = []gateway.Middleware{func(next http.Handler) http.Handler {
+	route.Middlewares = []edgekit.Middleware{func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() { unwound = true }()
 			next.ServeHTTP(w, r)
 		})
 	}}
-	app, err := gateway.NewWithConfig(gateway.Config{Routes: []gateway.Route{route}, Extensions: []any{extension}})
+	app, err := edgekit.NewWithConfig(edgekit.Config{Routes: []edgekit.Route{route}, Extensions: []any{extension}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -657,8 +657,8 @@ func TestCompletionOnOutboundPanic(t *testing.T) {
 func TestInvalidExtensions(t *testing.T) {
 	var typedNil *testExtension
 	for _, extension := range []any{nil, typedNil, struct{}{}} {
-		_, err := gateway.NewWithConfig(gateway.Config{
-			Routes: []gateway.Route{testRoute(t, "http://unused.invalid")}, Extensions: []any{extension},
+		_, err := edgekit.NewWithConfig(edgekit.Config{
+			Routes: []edgekit.Route{testRoute(t, "http://unused.invalid")}, Extensions: []any{extension},
 		})
 		if err == nil || !strings.Contains(err.Error(), "extension 0") {
 			t.Fatalf("invalid extension accepted: %T, error: %v", extension, err)

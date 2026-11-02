@@ -1,6 +1,8 @@
-# Go Gateway Starter
+# edgekit
 
-A deliberately minimal, extensible API gateway in Go. It uses `net/http`, `httputil.ReverseProxy`, and ordinary HTTP middleware. No third-party dependencies.
+Building blocks for API gateways in Go. It uses `net/http`, `httputil.ReverseProxy`, and ordinary HTTP middleware. No third-party dependencies.
+
+edgekit is not a CDN, an edge-computing platform, or a cache. It serves, routes, and proxies HTTP at the edge of your API.
 
 This code is a prototype for exploring how the parts interact. It will be replaced by a rewrite; see the [roadmap](docs/roadmap.md) and [ADRs](docs/adr/README.md) for the intended direction.
 
@@ -83,9 +85,9 @@ go run ./cmd/gateway
 ## Extend it
 
 Make any middleware by writing a function of type `func(http.Handler) http.Handler`.
-Use `gateway.New(routes, globalMiddleware...)`, and attach route-specific middleware with `Route.Middlewares`.
+Use `edgekit.New(routes, globalMiddleware...)`, and attach route-specific middleware with `Route.Middlewares`.
 
-For lifecycle extensions, use `gateway.NewWithConfig`:
+For lifecycle extensions, use `edgekit.NewWithConfig`:
 
 ```go
 access := accesslog.New(accesslog.Config{
@@ -99,14 +101,14 @@ access := accesslog.New(accesslog.Config{
             "has_response_error", record.ResponseError != nil)
     },
 })
-app, err := gateway.NewWithConfig(gateway.Config{
+app, err := edgekit.NewWithConfig(edgekit.Config{
     Routes:      routes,
-    Middlewares: []gateway.Middleware{access.Middleware},
+    Middlewares: []edgekit.Middleware{access.Middleware},
     Extensions:  []any{access},
 })
 ```
 
-Here `accesslog` is `example.com/go-gateway-starter/extensions/accesslog`. The demo uses it as the main lifecycle extension. `extensions/requesttag` remains a standalone shared-state example, but is not registered by the demo.
+Here `accesslog` is `github.com/go-edgekit/edgekit/extensions/accesslog`. The demo uses it as the main lifecycle extension. `extensions/requesttag` remains a standalone shared-state example, but is not registered by the demo.
 Middleware and hook registration are explicit and independent. Each extension implements only the interfaces it needs: `RequestHook`, `BeforeUpstreamHook`, `UpstreamResponseHook`, or `CompletionHook`. Extensions are shared across concurrent requests, so instance fields and completion callbacks must be concurrency-safe. Nil extensions and extensions implementing no hooks are rejected at startup.
 
 ### Execution and errors
@@ -128,7 +130,7 @@ Create RequestContext and attach it to the standard context
 Completion hooks
 ```
 
-Hooks run in registration order, including completion hooks. A request, outbound, or response hook error stops that phase. Return `&gateway.HTTPError{StatusCode: 403, Message: "denied"}` for a controlled rejection. Other request-hook errors produce a generic 500; outbound-hook, proxy, and upstream-response-hook errors produce a generic 502. A wrapped `*http.MaxBytesError` from request-body reading receives a generic 413. Error details remain in `Outcome.Err`, not the response. Normal upstream HTTP error statuses are forwarded and are not Go errors.
+Hooks run in registration order, including completion hooks. A request, outbound, or response hook error stops that phase. Return `&edgekit.HTTPError{StatusCode: 403, Message: "denied"}` for a controlled rejection. Other request-hook errors produce a generic 500; outbound-hook, proxy, and upstream-response-hook errors produce a generic 502. A wrapped `*http.MaxBytesError` from request-body reading receives a generic 413. Error details remain in `Outcome.Err`, not the response. Normal upstream HTTP error statuses are forwarded and are not Go errors.
 
 Completion runs once per gateway invocation after the middleware chain unwinds, even if middleware rejects, routing misses or redirects, or handling panics. Registered middleware must call `next` synchronously and at most once. Middleware that returns while downstream work continues (such as `http.TimeoutHandler`) is outside this experiment's lifecycle contract. Completion hooks must not panic or write a response. They receive the gateway entry context, which may already be canceled, rather than contexts derived inside middleware. Panics, including streaming aborts, continue to propagate.
 
@@ -136,21 +138,21 @@ Completion runs once per gateway invocation after the middleware chain unwinds, 
 
 ### Shared request state
 
-Call `gateway.FromContext(r.Context())` in middleware to retrieve the same `*RequestContext` passed to hooks. Metadata is gateway-owned: `StartedAt()`, `RoutePrefix()`, and `Upstream()` expose timing and available routing information. The upstream accessor returns a copy. Route middleware sees the matched route before proxying, but no upstream has been selected yet.
+Call `edgekit.FromContext(r.Context())` in middleware to retrieve the same `*RequestContext` passed to hooks. Metadata is gateway-owned: `StartedAt()`, `RoutePrefix()`, and `Upstream()` expose timing and available routing information. The upstream accessor returns a copy. Route middleware sees the matched route before proxying, but no upstream has been selected yet.
 
 Use a private typed key for extension state:
 
 ```go
-var identityKey = gateway.NewStateKey[string]()
+var identityKey = edgekit.NewStateKey[string]()
 
 // In middleware, before calling next:
-rc, ok := gateway.FromContext(r.Context())
+rc, ok := edgekit.FromContext(r.Context())
 if ok {
-    gateway.SetState(rc, identityKey, "example-user")
+    edgekit.SetState(rc, identityKey, "example-user")
 }
 
 // In a hook:
-identity, found := gateway.GetState(rc, identityKey)
+identity, found := edgekit.GetState(rc, identityKey)
 ```
 
 Distinct keys are isolated, even when their value types match. Stored nil values are distinguishable from missing values. Request context access is not synchronized: hooks run serially, and extensions must not access the context concurrently or retain it after completion. Standard contexts still own cancellation, deadlines, and trace propagation. Middleware must derive contexts from the incoming request context, not replace them with an unrelated context.

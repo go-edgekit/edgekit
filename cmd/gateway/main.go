@@ -12,12 +12,12 @@ import (
 	"syscall"
 	"time"
 
-	gateway "example.com/go-gateway-starter"
-	"example.com/go-gateway-starter/extensions/accesslog"
-	"example.com/go-gateway-starter/extensions/admission"
-	"example.com/go-gateway-starter/extensions/bodylimit"
-	"example.com/go-gateway-starter/extensions/headers"
-	"example.com/go-gateway-starter/internal/safelog"
+	"github.com/go-edgekit/edgekit"
+	"github.com/go-edgekit/edgekit/extensions/accesslog"
+	"github.com/go-edgekit/edgekit/extensions/admission"
+	"github.com/go-edgekit/edgekit/extensions/bodylimit"
+	"github.com/go-edgekit/edgekit/extensions/headers"
+	"github.com/go-edgekit/edgekit/internal/safelog"
 )
 
 func main() {
@@ -32,16 +32,16 @@ func main() {
 	transport := newUpstreamTransport()
 	defer transport.CloseIdleConnections()
 	access := accesslog.New(accesslog.Config{Report: logCompletion})
-	app, err := gateway.NewWithConfig(gateway.Config{
-		Routes: []gateway.Route{{
+	app, err := edgekit.NewWithConfig(edgekit.Config{
+		Routes: []edgekit.Route{{
 			Prefix:   "/api/",
 			Upstream: upstream,
-			Middlewares: []gateway.Middleware{
+			Middlewares: []edgekit.Middleware{
 				bodylimit.New(8 << 20), // Example policy: 8 MiB per request body.
 				headers.AddResponseHeader("X-Gateway", "starter"),
 			},
 		}},
-		Middlewares: []gateway.Middleware{access.Middleware, admission.New(64)},
+		Middlewares: []edgekit.Middleware{access.Middleware, admission.New(64)},
 		Extensions:  []any{access},
 		Transport:   transport,
 	})

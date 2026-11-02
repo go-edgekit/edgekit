@@ -10,7 +10,7 @@ Done: ADRs 0011–0016, status changes for 0002 and 0006–0008, and the [contex
 
 ## 2. Rewrite the core
 
-- New public module path and Apache-2.0 license ([ADR-0014](adr/0014-multi-module-repository.md)).
+- Public module path and Apache-2.0 license ([ADR-0014](adr/0014-multi-module-repository.md)). Done: `github.com/go-edgekit/edgekit` with the Apache-2.0 license.
 - Secure defaults R1–R5, R7, R8, and R9; opaque/absolute-form/`CONNECT` rejection; no transparent transport compression; extension-managed headers; body limit, admission, and egress as core protections ([ADR-0012](adr/0012-secure-defaults-and-configurable-protections.md)).
 - Core-owned hardened server ([ADR-0016](adr/0016-core-owns-the-inbound-server.md)).
 - Typed dial and request-written failures (R10) as execution facts, used by error mapping.

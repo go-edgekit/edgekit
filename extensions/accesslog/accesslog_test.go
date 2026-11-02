@@ -16,40 +16,40 @@ import (
 	"testing"
 	"time"
 
-	gateway "example.com/go-gateway-starter"
-	"example.com/go-gateway-starter/extensions/accesslog"
+	"github.com/go-edgekit/edgekit"
+	"github.com/go-edgekit/edgekit/extensions/accesslog"
 )
 
-type requestHook func(context.Context, *gateway.RequestContext, *http.Request) error
+type requestHook func(context.Context, *edgekit.RequestContext, *http.Request) error
 
-func (f requestHook) OnRequest(ctx context.Context, rc *gateway.RequestContext, r *http.Request) error {
+func (f requestHook) OnRequest(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) error {
 	return f(ctx, rc, r)
 }
 
-type responseHook func(context.Context, *gateway.RequestContext, *http.Response) error
+type responseHook func(context.Context, *edgekit.RequestContext, *http.Response) error
 
-func (f responseHook) OnUpstreamResponse(ctx context.Context, rc *gateway.RequestContext, r *http.Response) error {
+func (f responseHook) OnUpstreamResponse(ctx context.Context, rc *edgekit.RequestContext, r *http.Response) error {
 	return f(ctx, rc, r)
 }
 
-type completionHook func(context.Context, *gateway.RequestContext, gateway.Outcome)
+type completionHook func(context.Context, *edgekit.RequestContext, edgekit.Outcome)
 
-func (f completionHook) OnComplete(ctx context.Context, rc *gateway.RequestContext, outcome gateway.Outcome) {
+func (f completionHook) OnComplete(ctx context.Context, rc *edgekit.RequestContext, outcome edgekit.Outcome) {
 	f(ctx, rc, outcome)
 }
 
-func route(t *testing.T, address string) gateway.Route {
+func route(t *testing.T, address string) edgekit.Route {
 	t.Helper()
 	target, err := url.Parse(address)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return gateway.Route{Prefix: "/api/", Upstream: target}
+	return edgekit.Route{Prefix: "/api/", Upstream: target}
 }
 
-func newGateway(t *testing.T, config gateway.Config) *gateway.Gateway {
+func newGateway(t *testing.T, config edgekit.Config) *edgekit.Gateway {
 	t.Helper()
-	app, err := gateway.NewWithConfig(config)
+	app, err := edgekit.NewWithConfig(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,14 +103,14 @@ func TestRecordJoinsHTTPGatewayAndTraceObservations(t *testing.T) {
 			records = append(records, record)
 		},
 	})
-	checkContext := requestHook(func(ctx context.Context, _ *gateway.RequestContext, r *http.Request) error {
+	checkContext := requestHook(func(ctx context.Context, _ *edgekit.RequestContext, r *http.Request) error {
 		id, ok := accesslog.RequestIDFromContext(ctx)
 		if !ok || id != r.Header.Get("X-Request-ID") || ctx.Value(traceKey{}) != current {
 			t.Fatal("request ID or middleware trace context missing in hook")
 		}
 		return nil
 	})
-	checkCompletion := completionHook(func(ctx context.Context, _ *gateway.RequestContext, _ gateway.Outcome) {
+	checkCompletion := completionHook(func(ctx context.Context, _ *edgekit.RequestContext, _ edgekit.Outcome) {
 		if ctx.Value(traceKey{}) != nil {
 			t.Fatal("completion unexpectedly received the derived trace context")
 		}
@@ -121,8 +121,8 @@ func TestRecordJoinsHTTPGatewayAndTraceObservations(t *testing.T) {
 	configured := route(t, upstream.URL)
 	configured.Upstream.User = url.UserPassword("service", "upstream-secret")
 	configured.Upstream.RawQuery = "token=upstream-query-secret"
-	app := newGateway(t, gateway.Config{
-		Routes: []gateway.Route{configured}, Middlewares: []gateway.Middleware{tracing, observer.Middleware},
+	app := newGateway(t, edgekit.Config{
+		Routes: []edgekit.Route{configured}, Middlewares: []edgekit.Middleware{tracing, observer.Middleware},
 		Extensions: []any{observer, checkContext, checkCompletion},
 	})
 	r := httptest.NewRequest(http.MethodPost, "/api/data?token=request-query-secret", strings.NewReader("request-body-secret"))
@@ -166,7 +166,7 @@ func TestLocalResponsesAndGatewayFailures(t *testing.T) {
 	defer upstream.Close()
 	closed := httptest.NewServer(http.NotFoundHandler())
 	closed.Close()
-	denied := &gateway.HTTPError{StatusCode: http.StatusForbidden, Message: "denied"}
+	denied := &edgekit.HTTPError{StatusCode: http.StatusForbidden, Message: "denied"}
 	internal := errors.New("private failure details")
 
 	for _, tc := range []struct {
@@ -193,12 +193,12 @@ func TestLocalResponsesAndGatewayFailures(t *testing.T) {
 		{name: "proxy connection failure", address: closed.URL, wantStatus: 502, wantRoute: true, wantUpstream: true, wantResult: accesslog.ProxyError},
 		{name: "response hook rejection", responseError: denied, wantStatus: 403, wantRoute: true, wantUpstream: true, wantResponse: 503, wantResult: accesslog.Rejected},
 		{name: "response hook error", responseError: internal, wantStatus: 502, wantRoute: true, wantUpstream: true, wantResponse: 503, wantResult: accesslog.ProxyError},
-		{name: "invalid rejection", requestError: &gateway.HTTPError{StatusCode: 200, Message: "private"}, wantStatus: 500, wantResult: accesslog.GatewayError},
+		{name: "invalid rejection", requestError: &edgekit.HTTPError{StatusCode: 200, Message: "private"}, wantStatus: 500, wantResult: accesslog.GatewayError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var records []accesslog.Record
 			observer := accesslog.New(accesslog.Config{Report: func(record accesslog.Record) { records = append(records, record) }})
-			middleware := []gateway.Middleware{observer.Middleware}
+			middleware := []edgekit.Middleware{observer.Middleware}
 			if tc.localStatus != 0 {
 				middleware = append(middleware, func(http.Handler) http.Handler {
 					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -210,10 +210,10 @@ func TestLocalResponsesAndGatewayFailures(t *testing.T) {
 			}
 			extensions := []any{observer}
 			if tc.requestError != nil {
-				extensions = append(extensions, requestHook(func(context.Context, *gateway.RequestContext, *http.Request) error { return tc.requestError }))
+				extensions = append(extensions, requestHook(func(context.Context, *edgekit.RequestContext, *http.Request) error { return tc.requestError }))
 			}
 			if tc.responseError != nil {
-				extensions = append(extensions, responseHook(func(context.Context, *gateway.RequestContext, *http.Response) error { return tc.responseError }))
+				extensions = append(extensions, responseHook(func(context.Context, *edgekit.RequestContext, *http.Response) error { return tc.responseError }))
 			}
 			address := tc.address
 			if address == "" {
@@ -221,11 +221,11 @@ func TestLocalResponsesAndGatewayFailures(t *testing.T) {
 			}
 			configured := route(t, address)
 			if tc.routeDeny {
-				configured.Middlewares = []gateway.Middleware{func(http.Handler) http.Handler {
+				configured.Middlewares = []edgekit.Middleware{func(http.Handler) http.Handler {
 					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "denied", 403) })
 				}}
 			}
-			app := newGateway(t, gateway.Config{Routes: []gateway.Route{configured}, Middlewares: middleware, Extensions: extensions})
+			app := newGateway(t, edgekit.Config{Routes: []edgekit.Route{configured}, Middlewares: middleware, Extensions: extensions})
 			path := tc.path
 			if path == "" {
 				path = "/api/data"
@@ -277,9 +277,9 @@ func TestPanicAccountingDoesNotInventSuccessfulStatus(t *testing.T) {
 					panic(http.ErrAbortHandler)
 				})
 			}
-			app := newGateway(t, gateway.Config{
-				Routes:      []gateway.Route{route(t, "http://unused.invalid")},
-				Middlewares: []gateway.Middleware{observer.Middleware, panicking}, Extensions: []any{observer},
+			app := newGateway(t, edgekit.Config{
+				Routes:      []edgekit.Route{route(t, "http://unused.invalid")},
+				Middlewares: []edgekit.Middleware{observer.Middleware, panicking}, Extensions: []any{observer},
 			})
 			func() {
 				defer func() {
@@ -311,8 +311,8 @@ func TestStreamingReadFailureKeepsPartialHTTPObservations(t *testing.T) {
 	defer upstream.Close()
 	var records []accesslog.Record
 	observer := accesslog.New(accesslog.Config{Report: func(record accesslog.Record) { records = append(records, record) }})
-	app := newGateway(t, gateway.Config{
-		Routes: []gateway.Route{route(t, upstream.URL)}, Middlewares: []gateway.Middleware{observer.Middleware}, Extensions: []any{observer},
+	app := newGateway(t, edgekit.Config{
+		Routes: []edgekit.Route{route(t, upstream.URL)}, Middlewares: []edgekit.Middleware{observer.Middleware}, Extensions: []any{observer},
 	})
 	r := httptest.NewRequest(http.MethodGet, "/api/data", nil)
 	// Enable ReverseProxy's production behavior for response-copy failures.
@@ -351,9 +351,9 @@ func TestPartialWriteErrorIsSeparateFromGatewayError(t *testing.T) {
 	local := func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "hello") })
 	}
-	app := newGateway(t, gateway.Config{
-		Routes:      []gateway.Route{route(t, "http://unused.invalid")},
-		Middlewares: []gateway.Middleware{observer.Middleware, local}, Extensions: []any{observer},
+	app := newGateway(t, edgekit.Config{
+		Routes:      []edgekit.Route{route(t, "http://unused.invalid")},
+		Middlewares: []edgekit.Middleware{observer.Middleware, local}, Extensions: []any{observer},
 	})
 	app.ServeHTTP(&failingWriter{header: make(http.Header)}, httptest.NewRequest(http.MethodGet, "/api/data", nil))
 	if got.StatusCode != 200 || got.BytesWritten != 2 || !errors.Is(got.ResponseError, io.ErrClosedPipe) || got.Result != accesslog.WriteError || got.Outcome.Err != nil {
@@ -391,8 +391,8 @@ func TestStreamingResponseFlushesBeforeCompletion(t *testing.T) {
 	defer finish()
 	records := make(chan accesslog.Record, 1)
 	observer := accesslog.New(accesslog.Config{Report: func(record accesslog.Record) { records <- record }})
-	app := newGateway(t, gateway.Config{
-		Routes: []gateway.Route{route(t, upstream.URL)}, Middlewares: []gateway.Middleware{observer.Middleware}, Extensions: []any{observer},
+	app := newGateway(t, edgekit.Config{
+		Routes: []edgekit.Route{route(t, upstream.URL)}, Middlewares: []edgekit.Middleware{observer.Middleware}, Extensions: []any{observer},
 	})
 	server := httptest.NewServer(app)
 	defer server.Close()
@@ -448,8 +448,8 @@ func TestProtocolUpgradePreservesHijacking(t *testing.T) {
 	defer upstream.Close()
 	records := make(chan accesslog.Record, 1)
 	observer := accesslog.New(accesslog.Config{Report: func(record accesslog.Record) { records <- record }})
-	app := newGateway(t, gateway.Config{
-		Routes: []gateway.Route{route(t, upstream.URL)}, Middlewares: []gateway.Middleware{observer.Middleware}, Extensions: []any{observer},
+	app := newGateway(t, edgekit.Config{
+		Routes: []edgekit.Route{route(t, upstream.URL)}, Middlewares: []edgekit.Middleware{observer.Middleware}, Extensions: []any{observer},
 	})
 	server := httptest.NewServer(app)
 	defer server.Close()
@@ -513,8 +513,8 @@ func TestConcurrentRecordsKeepRequestAndTraceIDsIsolated(t *testing.T) {
 			records = append(records, record)
 		},
 	})
-	app := newGateway(t, gateway.Config{
-		Routes: []gateway.Route{route(t, upstream.URL)}, Middlewares: []gateway.Middleware{tracing, observer.Middleware}, Extensions: []any{observer},
+	app := newGateway(t, edgekit.Config{
+		Routes: []edgekit.Route{route(t, upstream.URL)}, Middlewares: []edgekit.Middleware{tracing, observer.Middleware}, Extensions: []any{observer},
 	})
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
@@ -541,7 +541,7 @@ func TestConcurrentRecordsKeepRequestAndTraceIDsIsolated(t *testing.T) {
 func TestMissingMiddlewareAndStandaloneUse(t *testing.T) {
 	calls := 0
 	observer := accesslog.New(accesslog.Config{Report: func(accesslog.Record) { calls++ }})
-	app := newGateway(t, gateway.Config{Routes: []gateway.Route{route(t, "http://unused.invalid")}, Extensions: []any{observer}})
+	app := newGateway(t, edgekit.Config{Routes: []edgekit.Route{route(t, "http://unused.invalid")}, Extensions: []any{observer}})
 	app.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/missing", nil))
 	standalone := observer.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) }))
 	w := httptest.NewRecorder()

@@ -8,11 +8,11 @@ It is not a production authentication protocol. The signature has no timestamp, 
 
 ```go
 signer := outboundsign.New()
-app, err := gateway.NewWithConfig(gateway.Config{
-    Routes: []gateway.Route{{
+app, err := edgekit.NewWithConfig(edgekit.Config{
+    Routes: []edgekit.Route{{
         Prefix:   "/api/",
         Upstream: target,
-        Middlewares: []gateway.Middleware{
+        Middlewares: []edgekit.Middleware{
             signer.WithKey(secret),
         },
     }},
@@ -20,7 +20,7 @@ app, err := gateway.NewWithConfig(gateway.Config{
 })
 ```
 
-Here `outboundsign` is `example.com/go-gateway-starter/extensions/outboundsign`, `target` is an upstream `*url.URL`, and `secret` is a non-empty `[]byte` supplied by the executable. Do not commit real secrets to source control.
+Here `outboundsign` is `github.com/go-edgekit/edgekit/extensions/outboundsign`, `target` is an upstream `*url.URL`, and `secret` is a non-empty `[]byte` supplied by the executable. Do not commit real secrets to source control.
 
 Register the same instance's `WithKey` middleware on every route that can reach its globally registered hook. Missing middleware or an empty key fails closed with a generic 502; it does not silently forward an unsigned request. Different routes can use different keys with one extension instance. `WithKey` copies the supplied key at construction.
 

@@ -19,9 +19,9 @@ import (
 	"testing"
 	"time"
 
-	gateway "example.com/go-gateway-starter"
-	"example.com/go-gateway-starter/extensions/accesslog"
-	"example.com/go-gateway-starter/internal/safelog"
+	"github.com/go-edgekit/edgekit"
+	"github.com/go-edgekit/edgekit/extensions/accesslog"
+	"github.com/go-edgekit/edgekit/internal/safelog"
 )
 
 func TestUpstreamTransportPolicy(t *testing.T) {
@@ -56,7 +56,7 @@ func TestHeaderTimeoutDoesNotLimitResponseStream(t *testing.T) {
 	transport.ResponseHeaderTimeout = 50 * time.Millisecond
 	defer transport.CloseIdleConnections()
 	target, _ := url.Parse(upstream.URL)
-	app, err := gateway.NewWithConfig(gateway.Config{Routes: []gateway.Route{{Prefix: "/api/", Upstream: target}}, Transport: transport})
+	app, err := edgekit.NewWithConfig(edgekit.Config{Routes: []edgekit.Route{{Prefix: "/api/", Upstream: target}}, Transport: transport})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestCompletionLogUsesOnlyApprovedFields(t *testing.T) {
 	logCompletion(accesslog.Record{
 		RequestID: id, TraceID: "trace-secret", Method: "method-secret", Path: "/api/path-secret",
 		RoutePrefix: "/route-secret/", Upstream: "https://origin-secret", StatusCode: 502, Result: "result-secret",
-		Outcome: gateway.Outcome{Err: failure}, ResponseError: errors.New("write-secret"),
+		Outcome: edgekit.Outcome{Err: failure}, ResponseError: errors.New("write-secret"),
 	})
 	if strings.Contains(output.String(), "secret") {
 		t.Fatalf("completion log exposed a sensitive field: %s", output.String())
@@ -197,9 +197,9 @@ func TestFailureLogsDoNotEchoConfigurationOrErrors(t *testing.T) {
 	}
 }
 
-type completionObserver func(gateway.Outcome)
+type completionObserver func(edgekit.Outcome)
 
-func (f completionObserver) OnComplete(_ context.Context, _ *gateway.RequestContext, outcome gateway.Outcome) {
+func (f completionObserver) OnComplete(_ context.Context, _ *edgekit.RequestContext, outcome edgekit.Outcome) {
 	f(outcome)
 }
 
@@ -208,11 +208,11 @@ func TestServerDiagnosticsDoNotChangeCompletionOrEchoDetails(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			output := captureExampleLogs(t)
 			unwound := false
-			outcomes := make(chan gateway.Outcome, 2)
+			outcomes := make(chan edgekit.Outcome, 2)
 			target, _ := url.Parse("http://unused.test")
-			app, err := gateway.NewWithConfig(gateway.Config{
-				Routes: []gateway.Route{{Prefix: "/api/", Upstream: target}},
-				Middlewares: []gateway.Middleware{func(http.Handler) http.Handler {
+			app, err := edgekit.NewWithConfig(edgekit.Config{
+				Routes: []edgekit.Route{{Prefix: "/api/", Upstream: target}},
+				Middlewares: []edgekit.Middleware{func(http.Handler) http.Handler {
 					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						defer func() { unwound = true }()
 						switch mode {
@@ -226,7 +226,7 @@ func TestServerDiagnosticsDoNotChangeCompletionOrEchoDetails(t *testing.T) {
 						_, _ = io.WriteString(w, "public")
 					})
 				}},
-				Extensions: []any{completionObserver(func(outcome gateway.Outcome) {
+				Extensions: []any{completionObserver(func(outcome edgekit.Outcome) {
 					if !unwound {
 						t.Error("completion preceded middleware unwind")
 					}

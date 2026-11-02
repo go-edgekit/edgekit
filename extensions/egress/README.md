@@ -1,6 +1,6 @@
 # Direct upstream destination policy
 
-`egress` is an optional transport package for explicit origin and IP-network allowlists. It uses the existing `gateway.Config.Transport` boundary; it adds no framework configuration or lifecycle hooks. It is opt-in and is **not enabled by the demo executable**. A deployment must choose its actual allowed destinations, including private networks where needed.
+`egress` is an optional transport package for explicit origin and IP-network allowlists. It uses the existing `edgekit.Config.Transport` boundary; it adds no framework configuration or lifecycle hooks. It is opt-in and is **not enabled by the demo executable**. A deployment must choose its actual allowed destinations, including private networks where needed.
 
 ## Registration
 
@@ -25,13 +25,13 @@ if err != nil {
 }
 defer transport.CloseIdleConnections()
 
-app, err := gateway.NewWithConfig(gateway.Config{
+app, err := edgekit.NewWithConfig(edgekit.Config{
     Routes:    routes,
     Transport: transport,
 })
 ```
 
-Here `egress` is `example.com/go-gateway-starter/extensions/egress`; `netip` is `net/netip`. The snippet belongs inside application setup. `routes` must use the allowed origins, with any required base paths and queries. Origins themselves cannot include base paths or queries.
+Here `egress` is `github.com/go-edgekit/edgekit/extensions/egress`; `netip` is `net/netip`. The snippet belongs inside application setup. `routes` must use the allowed origins, with any required base paths and queries. Origins themselves cannot include base paths or queries.
 
 Both allowlists are required. IPv4/IPv6 CIDRs are explicit permissions, not exclusions: broad `/0` prefixes grant broad access. Loopback, private, link-local, and metadata-service addresses have no implicit permission or blanket prohibition; permit only the networks the deployment needs. Use IPv4 prefixes for IPv4-mapped addresses. Unspecified, multicast, and scoped IP addresses are always rejected.
 

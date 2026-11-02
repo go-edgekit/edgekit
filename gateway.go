@@ -1,7 +1,7 @@
-// Package gateway provides a small, extensible HTTP reverse proxy.
+// Package edgekit provides building blocks for API gateways.
 // Routing and reverse proxying are part of the core; authentication,
 // authorization, and limits can be added as ordinary HTTP middleware.
-package gateway
+package edgekit
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"example.com/go-gateway-starter/internal/safelog"
+	"github.com/go-edgekit/edgekit/internal/safelog"
 )
 
 // Route associates a URL prefix with one upstream and optional middleware.

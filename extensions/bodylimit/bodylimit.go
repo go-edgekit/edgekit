@@ -4,7 +4,7 @@ package bodylimit
 import (
 	"net/http"
 
-	gateway "example.com/go-gateway-starter"
+	"github.com/go-edgekit/edgekit"
 )
 
 // New limits bytes read from the request body without buffering it. Negative
@@ -12,7 +12,7 @@ import (
 // rejected before calling next. Unknown lengths are limited while reading, so
 // an upstream may receive a partial body before the limit is exceeded.
 // Register this middleware inside the gateway's managed chain.
-func New(maxBytes int64) gateway.Middleware {
+func New(maxBytes int64) edgekit.Middleware {
 	if maxBytes < 0 {
 		panic("bodylimit: negative limit")
 	}

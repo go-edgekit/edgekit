@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/go-gateway-starter/extensions/admission"
+	"github.com/go-edgekit/edgekit/extensions/admission"
 )
 
 func wait[T any](t *testing.T, ch <-chan T) T {

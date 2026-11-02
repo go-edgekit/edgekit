@@ -1,4 +1,4 @@
-package gateway_test
+package edgekit_test
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	gateway "example.com/go-gateway-starter"
+	"github.com/go-edgekit/edgekit"
 )
 
 func captureGatewayDiagnostics(t *testing.T) *bytes.Buffer {
@@ -51,18 +51,18 @@ func TestProxyStreamDiagnosticOmitsDetailsAndPreservesAbort(t *testing.T) {
 	failure := &url.Error{Op: "read", URL: "https://user:credential-secret@host/path-secret?token=query-secret", Err: errors.New("body-secret\nAuthorization: header-secret")}
 	body := &diagnosticBody{failure: failure}
 	unwound, completed := false, 0
-	app, err := gateway.NewWithConfig(gateway.Config{
-		Routes: []gateway.Route{testRoute(t, "http://upstream.test/base?token=upstream-secret")},
+	app, err := edgekit.NewWithConfig(edgekit.Config{
+		Routes: []edgekit.Route{testRoute(t, "http://upstream.test/base?token=upstream-secret")},
 		Transport: safetyRoundTripper(func(r *http.Request) (*http.Response, error) {
 			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: body, Request: r}, nil
 		}),
-		Middlewares: []gateway.Middleware{func(next http.Handler) http.Handler {
+		Middlewares: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				defer func() { unwound = true }()
 				next.ServeHTTP(w, r)
 			})
 		}},
-		Extensions: []any{&testExtension{complete: func(_ context.Context, _ *gateway.RequestContext, outcome gateway.Outcome) {
+		Extensions: []any{&testExtension{complete: func(_ context.Context, _ *edgekit.RequestContext, outcome edgekit.Outcome) {
 			completed++
 			if !unwound || !outcome.Aborted || outcome.Err != nil {
 				t.Errorf("stream logging changed completion semantics: unwound=%v outcome=%+v", unwound, outcome)
@@ -100,12 +100,12 @@ func TestProxyErrorRemainsAvailableWithoutAutomaticLogging(t *testing.T) {
 	output := captureGatewayDiagnostics(t)
 	failure := &url.Error{Op: "POST", URL: "https://user:credential-secret@host/path-secret?token=query-secret", Err: errors.New("authorization-secret")}
 	var observed error
-	app, err := gateway.NewWithConfig(gateway.Config{
-		Routes: []gateway.Route{testRoute(t, "http://upstream.test")},
+	app, err := edgekit.NewWithConfig(edgekit.Config{
+		Routes: []edgekit.Route{testRoute(t, "http://upstream.test")},
 		Transport: safetyRoundTripper(func(*http.Request) (*http.Response, error) {
 			return nil, failure
 		}),
-		Extensions: []any{&testExtension{complete: func(_ context.Context, _ *gateway.RequestContext, outcome gateway.Outcome) { observed = outcome.Err }}},
+		Extensions: []any{&testExtension{complete: func(_ context.Context, _ *edgekit.RequestContext, outcome edgekit.Outcome) { observed = outcome.Err }}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +120,7 @@ func TestProxyErrorRemainsAvailableWithoutAutomaticLogging(t *testing.T) {
 func TestGatewayConstructionDoesNotReconfigureProcessLogging(t *testing.T) {
 	output := captureGatewayDiagnostics(t)
 	logger, writer := slog.Default(), log.Writer()
-	_, err := gateway.New([]gateway.Route{testRoute(t, "http://upstream.test")})
+	_, err := edgekit.New([]edgekit.Route{testRoute(t, "http://upstream.test")})
 	if err != nil {
 		t.Fatal(err)
 	}

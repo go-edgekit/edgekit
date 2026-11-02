@@ -4,7 +4,7 @@ package admission
 import (
 	"net/http"
 
-	gateway "example.com/go-gateway-starter"
+	"github.com/go-edgekit/edgekit"
 )
 
 // New limits concurrent calls to downstream handlers with no waiting queue.
@@ -20,7 +20,7 @@ import (
 // Register inside the gateway, after response-observing middleware. The budget
 // does not cover outer middleware, completion callbacks, rejected-response
 // writes, or server work outside the handler chain.
-func New(maxActive int) gateway.Middleware {
+func New(maxActive int) edgekit.Middleware {
 	if maxActive <= 0 {
 		panic("admission: max active calls must be positive")
 	}

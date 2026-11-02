@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"net/http"
 
-	gateway "example.com/go-gateway-starter"
+	"github.com/go-edgekit/edgekit"
 )
 
 // Result classifies the observations available to this extension. Proxy errors
@@ -53,7 +53,7 @@ type Record struct {
 	ResponseError error
 	Hijacked      bool
 	Result        Result
-	Outcome       gateway.Outcome
+	Outcome       edgekit.Outcome
 }
 
 // Config configures an access-log extension. Both callbacks may run concurrently
@@ -73,7 +73,7 @@ type Config struct {
 // Like the gateway lifecycle, it requires synchronous downstream execution.
 type Extension struct {
 	config Config
-	key    *gateway.StateKey[*requestState]
+	key    *edgekit.StateKey[*requestState]
 }
 
 type requestState struct {
@@ -85,7 +85,7 @@ type requestIDKey struct{}
 
 // New creates an access-log extension. Configure it once before serving.
 func New(config Config) *Extension {
-	return &Extension{config: config, key: gateway.NewStateKey[*requestState]()}
+	return &Extension{config: config, key: edgekit.NewStateKey[*requestState]()}
 }
 
 // RequestIDFromContext returns the ID created by this extension's middleware.
@@ -100,7 +100,7 @@ func RequestIDFromContext(ctx context.Context) (string, bool) {
 // If rand.Read returns an error, generating the request ID panics.
 func (e *Extension) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rc, ok := gateway.FromContext(r.Context())
+		rc, ok := edgekit.FromContext(r.Context())
 		if !ok {
 			next.ServeHTTP(w, r)
 			return
@@ -110,7 +110,7 @@ func (e *Extension) Middleware(next http.Handler) http.Handler {
 			record:   Record{Method: r.Method, Path: r.URL.Path},
 			response: response,
 		}
-		gateway.SetState(rc, e.key, state)
+		edgekit.SetState(rc, e.key, state)
 
 		id := newRequestID()
 		state.record.RequestID = id
@@ -132,8 +132,8 @@ func (e *Extension) Middleware(next http.Handler) http.Handler {
 
 // OnUpstreamResponse records the upstream status and prevents an upstream from
 // replacing this extension's response request ID. It also sees 101 upgrades.
-func (e *Extension) OnUpstreamResponse(_ context.Context, rc *gateway.RequestContext, response *http.Response) error {
-	if state, ok := gateway.GetState(rc, e.key); ok {
+func (e *Extension) OnUpstreamResponse(_ context.Context, rc *edgekit.RequestContext, response *http.Response) error {
+	if state, ok := edgekit.GetState(rc, e.key); ok {
 		state.record.UpstreamStatusCode = response.StatusCode
 		response.Header.Del("X-Request-ID")
 		// Forwarded informational responses may have cleared downstream headers.
@@ -144,8 +144,8 @@ func (e *Extension) OnUpstreamResponse(_ context.Context, rc *gateway.RequestCon
 
 // OnComplete joins middleware observations with final gateway metadata. Trace
 // correlation comes from the middleware snapshot, not this entry context.
-func (e *Extension) OnComplete(_ context.Context, rc *gateway.RequestContext, outcome gateway.Outcome) {
-	state, ok := gateway.GetState(rc, e.key)
+func (e *Extension) OnComplete(_ context.Context, rc *edgekit.RequestContext, outcome edgekit.Outcome) {
+	state, ok := edgekit.GetState(rc, e.key)
 	if !ok || e.config.Report == nil {
 		return
 	}
@@ -171,7 +171,7 @@ func classify(record Record) Result {
 		return WriteError
 	}
 	if record.Outcome.Err != nil {
-		var rejection *gateway.HTTPError
+		var rejection *edgekit.HTTPError
 		if errors.As(record.Outcome.Err, &rejection) && rejection != nil && rejection.StatusCode >= 400 && rejection.StatusCode <= 599 {
 			return Rejected
 		}

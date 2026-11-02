@@ -1,4 +1,4 @@
-package gateway_test
+package edgekit_test
 
 import (
 	"io"
@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	gateway "example.com/go-gateway-starter"
-	"example.com/go-gateway-starter/extensions/headers"
+	"github.com/go-edgekit/edgekit"
+	"github.com/go-edgekit/edgekit/extensions/headers"
 )
 
 func TestProxyForwardsRequestAndAppliesRouteMiddleware(t *testing.T) {
@@ -33,10 +33,10 @@ func TestProxyForwardsRequestAndAppliesRouteMiddleware(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	app, err := gateway.New([]gateway.Route{{
+	app, err := edgekit.New([]edgekit.Route{{
 		Prefix:      "/api/",
 		Upstream:    target,
-		Middlewares: []gateway.Middleware{headers.AddResponseHeader("X-Extension", "active")},
+		Middlewares: []edgekit.Middleware{headers.AddResponseHeader("X-Extension", "active")},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestProxyForwardsRequestAndAppliesRouteMiddleware(t *testing.T) {
 
 func TestGlobalAndRouteMiddlewareOrder(t *testing.T) {
 	var steps []string
-	wrap := func(name string) gateway.Middleware {
+	wrap := func(name string) edgekit.Middleware {
 		return func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				steps = append(steps, name+":before")
@@ -71,7 +71,7 @@ func TestGlobalAndRouteMiddlewareOrder(t *testing.T) {
 	}))
 	defer upstream.Close()
 	target, _ := url.Parse(upstream.URL)
-	app, err := gateway.New([]gateway.Route{{Prefix: "/api/", Upstream: target, Middlewares: []gateway.Middleware{wrap("route")}}}, wrap("global"))
+	app, err := edgekit.New([]edgekit.Route{{Prefix: "/api/", Upstream: target, Middlewares: []edgekit.Middleware{wrap("route")}}}, wrap("global"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestGlobalAndRouteMiddlewareOrder(t *testing.T) {
 }
 
 func TestInvalidRoute(t *testing.T) {
-	_, err := gateway.New([]gateway.Route{{Prefix: "api", Upstream: &url.URL{Scheme: "http", Host: "localhost"}}})
+	_, err := edgekit.New([]edgekit.Route{{Prefix: "api", Upstream: &url.URL{Scheme: "http", Host: "localhost"}}})
 	if err == nil {
 		t.Fatal("expected invalid route error")
 	}

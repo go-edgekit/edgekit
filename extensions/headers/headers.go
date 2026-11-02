@@ -4,12 +4,12 @@ package headers
 import (
 	"net/http"
 
-	gateway "example.com/go-gateway-starter"
+	"github.com/go-edgekit/edgekit"
 )
 
 // AddResponseHeader demonstrates how downstream middleware can be written
 // without changing the core gateway package.
-func AddResponseHeader(name, value string) gateway.Middleware {
+func AddResponseHeader(name, value string) edgekit.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set(name, value)

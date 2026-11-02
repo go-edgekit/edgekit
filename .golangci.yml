@@ -46,7 +46,7 @@ linters:
           allow:
             - "$gostd"
             - "golang.org/x"
-            - "example.com/go-gateway-starter"
+            - "github.com/go-edgekit/edgekit"
     exhaustive:
       default-signifies-exhaustive: true
     godoclint:
@@ -131,10 +131,12 @@ formatters:
     - goimports
   settings:
     gofumpt:
-      extra-rules: true
+      extra:
+        group-params: true
+        clothe-returns: true
     goimports:
       local-prefixes:
-        - example.com/go-gateway-starter
+        - github.com/go-edgekit/edgekit
 
 issues:
   max-issues-per-linter: 0

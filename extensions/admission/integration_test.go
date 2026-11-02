@@ -15,20 +15,20 @@ import (
 	"testing"
 	"time"
 
-	gateway "example.com/go-gateway-starter"
-	"example.com/go-gateway-starter/extensions/accesslog"
-	"example.com/go-gateway-starter/extensions/admission"
+	"github.com/go-edgekit/edgekit"
+	"github.com/go-edgekit/edgekit/extensions/accesslog"
+	"github.com/go-edgekit/edgekit/extensions/admission"
 )
 
-type completionFunc func(*gateway.RequestContext, gateway.Outcome)
+type completionFunc func(*edgekit.RequestContext, edgekit.Outcome)
 
-func (f completionFunc) OnComplete(_ context.Context, rc *gateway.RequestContext, outcome gateway.Outcome) {
+func (f completionFunc) OnComplete(_ context.Context, rc *edgekit.RequestContext, outcome edgekit.Outcome) {
 	f(rc, outcome)
 }
 
-type requestFunc func(*gateway.RequestContext, *http.Request) error
+type requestFunc func(*edgekit.RequestContext, *http.Request) error
 
-func (f requestFunc) OnRequest(_ context.Context, rc *gateway.RequestContext, r *http.Request) error {
+func (f requestFunc) OnRequest(_ context.Context, rc *edgekit.RequestContext, r *http.Request) error {
 	return f(rc, r)
 }
 
@@ -41,9 +41,9 @@ func TestGatewaySaturationIsLocalAndCompletionRunsAfterUnwind(t *testing.T) {
 	var once sync.Once
 	finish := func() { once.Do(func() { close(release) }) }
 	defer finish()
-	unwoundKey := gateway.NewStateKey[bool]()
+	unwoundKey := edgekit.NewStateKey[bool]()
 	type observed struct {
-		outcome                  gateway.Outcome
+		outcome                  edgekit.Outcome
 		route, selected, unwound bool
 	}
 	completed := make(chan observed, 2)
@@ -51,12 +51,12 @@ func TestGatewaySaturationIsLocalAndCompletionRunsAfterUnwind(t *testing.T) {
 	access := accesslog.New(accesslog.Config{Report: func(record accesslog.Record) { records <- record }})
 	var requests atomic.Int32
 	target, _ := url.Parse("http://upstream.test")
-	app, err := gateway.NewWithConfig(gateway.Config{
-		Routes: []gateway.Route{{Prefix: "/api/", Upstream: target}},
-		Middlewares: []gateway.Middleware{access.Middleware, func(next http.Handler) http.Handler {
+	app, err := edgekit.NewWithConfig(edgekit.Config{
+		Routes: []edgekit.Route{{Prefix: "/api/", Upstream: target}},
+		Middlewares: []edgekit.Middleware{access.Middleware, func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				rc, _ := gateway.FromContext(r.Context())
-				defer gateway.SetState(rc, unwoundKey, true)
+				rc, _ := edgekit.FromContext(r.Context())
+				defer edgekit.SetState(rc, unwoundKey, true)
 				next.ServeHTTP(w, r)
 			})
 		}, admission.New(1)},
@@ -65,13 +65,15 @@ func TestGatewaySaturationIsLocalAndCompletionRunsAfterUnwind(t *testing.T) {
 			<-release
 			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok")), Request: r}, nil
 		}),
-		Extensions: []any{access, requestFunc(func(*gateway.RequestContext, *http.Request) error { requests.Add(1); return nil }),
-			completionFunc(func(rc *gateway.RequestContext, outcome gateway.Outcome) {
+		Extensions: []any{
+			access, requestFunc(func(*edgekit.RequestContext, *http.Request) error { requests.Add(1); return nil }),
+			completionFunc(func(rc *edgekit.RequestContext, outcome edgekit.Outcome) {
 				_, route := rc.RoutePrefix()
 				_, selected := rc.Upstream()
-				unwound, _ := gateway.GetState(rc, unwoundKey)
+				unwound, _ := edgekit.GetState(rc, unwoundKey)
 				completed <- observed{outcome: outcome, route: route, selected: selected, unwound: unwound}
-			})},
+			}),
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -188,11 +190,11 @@ func TestCancellationDuringPoolAcquisitionReleasesAdmissionSlot(t *testing.T) {
 	transport.MaxConnsPerHost = 1
 	defer transport.CloseIdleConnections()
 	target, _ := url.Parse(upstream.URL)
-	completed := make(chan gateway.Outcome, 4)
-	app, err := gateway.NewWithConfig(gateway.Config{
-		Routes: []gateway.Route{{Prefix: "/api/", Upstream: target}}, Transport: transport,
-		Middlewares: []gateway.Middleware{admission.New(2)},
-		Extensions:  []any{completionFunc(func(_ *gateway.RequestContext, outcome gateway.Outcome) { completed <- outcome })},
+	completed := make(chan edgekit.Outcome, 4)
+	app, err := edgekit.NewWithConfig(edgekit.Config{
+		Routes: []edgekit.Route{{Prefix: "/api/", Upstream: target}}, Transport: transport,
+		Middlewares: []edgekit.Middleware{admission.New(2)},
+		Extensions:  []any{completionFunc(func(_ *edgekit.RequestContext, outcome edgekit.Outcome) { completed <- outcome })},
 	})
 	if err != nil {
 		t.Fatal(err)

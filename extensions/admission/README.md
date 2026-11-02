@@ -4,9 +4,9 @@
 
 ```go
 admit := admission.New(64)
-app, err := gateway.NewWithConfig(gateway.Config{
+app, err := edgekit.NewWithConfig(edgekit.Config{
     Routes: routes,
-    Middlewares: []gateway.Middleware{
+    Middlewares: []edgekit.Middleware{
         access.Middleware, // Observe both admitted and saturated requests.
         admit,
     },
@@ -14,7 +14,7 @@ app, err := gateway.NewWithConfig(gateway.Config{
 })
 ```
 
-Here `admission` is `example.com/go-gateway-starter/extensions/admission`. The example executable uses this order and a limit of 64. These are example settings, not framework defaults. No new hook or gateway configuration field is needed.
+Here `admission` is `github.com/go-edgekit/edgekit/extensions/admission`. The example executable uses this order and a limit of 64. These are example settings, not framework defaults. No new hook or gateway configuration field is needed.
 
 ## Behavior
 

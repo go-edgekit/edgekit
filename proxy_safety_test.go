@@ -1,4 +1,4 @@
-package gateway_test
+package edgekit_test
 
 import (
 	"context"
@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	gateway "example.com/go-gateway-starter"
-	"example.com/go-gateway-starter/extensions/admission"
-	"example.com/go-gateway-starter/extensions/bodylimit"
+	"github.com/go-edgekit/edgekit"
+	"github.com/go-edgekit/edgekit/extensions/admission"
+	"github.com/go-edgekit/edgekit/extensions/bodylimit"
 )
 
 func safetyTransport(t *testing.T) *http.Transport {
@@ -54,8 +54,8 @@ func TestForwardingTrustAndHopByHopHeaders(t *testing.T) {
 				_, _ = io.WriteString(w, "ok")
 			}))
 			defer upstream.Close()
-			app, err := gateway.NewWithConfig(gateway.Config{
-				Routes: []gateway.Route{testRoute(t, upstream.URL)}, Transport: safetyTransport(t),
+			app, err := edgekit.NewWithConfig(edgekit.Config{
+				Routes: []edgekit.Route{testRoute(t, upstream.URL)}, Transport: safetyTransport(t),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -120,16 +120,16 @@ func TestConfiguredTransportWithAndWithoutOutboundHooks(t *testing.T) {
 			t.Run(strings.Join([]string{map[bool]string{false: "plain", true: "hooks"}[withHooks], map[bool]string{false: "success", true: "failure"}[fail]}, "/"), func(t *testing.T) {
 				calls := 0
 				failure := errors.New("private transport detail")
-				var observed gateway.Outcome
+				var observed edgekit.Outcome
 				extension := &testExtension{
-					outbound: func(_ context.Context, _ *gateway.RequestContext, r *http.Request) error {
+					outbound: func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) error {
 						r.Header.Set("X-Hook", "ran")
 						return nil
 					},
-					complete: func(_ context.Context, _ *gateway.RequestContext, outcome gateway.Outcome) { observed = outcome },
+					complete: func(_ context.Context, _ *edgekit.RequestContext, outcome edgekit.Outcome) { observed = outcome },
 				}
-				config := gateway.Config{
-					Routes: []gateway.Route{testRoute(t, "http://unused.invalid")},
+				config := edgekit.Config{
+					Routes: []edgekit.Route{testRoute(t, "http://unused.invalid")},
 					Transport: safetyRoundTripper(func(r *http.Request) (*http.Response, error) {
 						calls++
 						if (r.Header.Get("X-Hook") == "ran") != withHooks {
@@ -144,7 +144,7 @@ func TestConfiguredTransportWithAndWithoutOutboundHooks(t *testing.T) {
 				if withHooks {
 					config.Extensions = []any{extension}
 				}
-				app, err := gateway.NewWithConfig(config)
+				app, err := edgekit.NewWithConfig(config)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -174,7 +174,7 @@ func TestTransportReusesConnectionsAcrossRoutes(t *testing.T) {
 	defer upstream.Close()
 	first, second := testRoute(t, upstream.URL), testRoute(t, upstream.URL)
 	second.Prefix = "/other/"
-	app, err := gateway.NewWithConfig(gateway.Config{Routes: []gateway.Route{first, second}, Transport: safetyTransport(t)})
+	app, err := edgekit.NewWithConfig(edgekit.Config{Routes: []edgekit.Route{first, second}, Transport: safetyTransport(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,17 +199,17 @@ func TestResponseHeaderTimeoutCancelsUpstream(t *testing.T) {
 	defer upstream.Close()
 	transport := safetyTransport(t)
 	transport.ResponseHeaderTimeout = 100 * time.Millisecond
-	var outcome gateway.Outcome
+	var outcome edgekit.Outcome
 	unwound := false
-	app, err := gateway.NewWithConfig(gateway.Config{
-		Routes: []gateway.Route{testRoute(t, upstream.URL)}, Transport: transport,
-		Middlewares: []gateway.Middleware{func(next http.Handler) http.Handler {
+	app, err := edgekit.NewWithConfig(edgekit.Config{
+		Routes: []edgekit.Route{testRoute(t, upstream.URL)}, Transport: transport,
+		Middlewares: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				defer func() { unwound = true }()
 				next.ServeHTTP(w, r)
 			})
 		}},
-		Extensions: []any{&testExtension{complete: func(_ context.Context, _ *gateway.RequestContext, got gateway.Outcome) {
+		Extensions: []any{&testExtension{complete: func(_ context.Context, _ *edgekit.RequestContext, got edgekit.Outcome) {
 			if !unwound {
 				t.Error("completion preceded middleware unwind")
 			}
@@ -245,18 +245,18 @@ func TestClientCancellationReachesUpstreamAndCompletion(t *testing.T) {
 				close(canceled)
 			}))
 			defer upstream.Close()
-			outcomes := make(chan gateway.Outcome, 2)
+			outcomes := make(chan edgekit.Outcome, 2)
 			var completions atomic.Int32
 			unwound := false
-			app, err := gateway.NewWithConfig(gateway.Config{
-				Routes: []gateway.Route{testRoute(t, upstream.URL)}, Transport: safetyTransport(t),
-				Middlewares: []gateway.Middleware{func(next http.Handler) http.Handler {
+			app, err := edgekit.NewWithConfig(edgekit.Config{
+				Routes: []edgekit.Route{testRoute(t, upstream.URL)}, Transport: safetyTransport(t),
+				Middlewares: []edgekit.Middleware{func(next http.Handler) http.Handler {
 					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						defer func() { unwound = true }()
 						next.ServeHTTP(w, r)
 					})
 				}},
-				Extensions: []any{&testExtension{complete: func(ctx context.Context, _ *gateway.RequestContext, outcome gateway.Outcome) {
+				Extensions: []any{&testExtension{complete: func(ctx context.Context, _ *edgekit.RequestContext, outcome edgekit.Outcome) {
 					if !unwound || ctx.Err() == nil {
 						t.Error("completion lost middleware unwind or entry cancellation")
 					}
@@ -335,7 +335,7 @@ func TestCancellationWhileWaitingForConnectionPool(t *testing.T) {
 	defer close(release)
 	transport := safetyTransport(t)
 	transport.MaxConnsPerHost = 1
-	app, err := gateway.NewWithConfig(gateway.Config{Routes: []gateway.Route{testRoute(t, upstream.URL)}, Transport: transport})
+	app, err := edgekit.NewWithConfig(edgekit.Config{Routes: []edgekit.Route{testRoute(t, upstream.URL)}, Transport: transport})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,10 +380,10 @@ func TestRequestBodyStreamsBeforeClientEOF(t *testing.T) {
 	}))
 	defer upstream.Close()
 	route := testRoute(t, upstream.URL)
-	route.Middlewares = []gateway.Middleware{bodylimit.New(6)}
-	app, err := gateway.NewWithConfig(gateway.Config{
-		Routes: []gateway.Route{route}, Transport: safetyTransport(t),
-		Middlewares: []gateway.Middleware{admission.New(1)},
+	route.Middlewares = []edgekit.Middleware{bodylimit.New(6)}
+	app, err := edgekit.NewWithConfig(edgekit.Config{
+		Routes: []edgekit.Route{route}, Transport: safetyTransport(t),
+		Middlewares: []edgekit.Middleware{admission.New(1)},
 	})
 	if err != nil {
 		t.Fatal(err)

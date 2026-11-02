@@ -18,16 +18,16 @@ import (
 	"testing"
 	"time"
 
-	gateway "example.com/go-gateway-starter"
+	"github.com/go-edgekit/edgekit"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-type completionFunc func(*gateway.RequestContext, gateway.Outcome)
+type completionFunc func(*edgekit.RequestContext, edgekit.Outcome)
 
-func (f completionFunc) OnComplete(_ context.Context, rc *gateway.RequestContext, outcome gateway.Outcome) {
+func (f completionFunc) OnComplete(_ context.Context, rc *edgekit.RequestContext, outcome edgekit.Outcome) {
 	f(rc, outcome)
 }
 
@@ -105,10 +105,10 @@ func TestGatewayPreservesHTTPAndTLSIdentityAndReusesConnections(t *testing.T) {
 				}
 				return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
 			}
-			var outcomes []gateway.Outcome
-			app, err := gateway.NewWithConfig(gateway.Config{
-				Routes: []gateway.Route{{Prefix: "/api/", Upstream: target}}, Transport: p,
-				Extensions: []any{completionFunc(func(_ *gateway.RequestContext, outcome gateway.Outcome) { outcomes = append(outcomes, outcome) })},
+			var outcomes []edgekit.Outcome
+			app, err := edgekit.NewWithConfig(edgekit.Config{
+				Routes: []edgekit.Route{{Prefix: "/api/", Upstream: target}}, Transport: p,
+				Extensions: []any{completionFunc(func(_ *edgekit.RequestContext, outcome edgekit.Outcome) { outcomes = append(outcomes, outcome) })},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -210,15 +210,15 @@ func TestGatewayDenialRemainsAnExecutionErrorAfterMiddlewareUnwinds(t *testing.T
 				}
 			}
 			unwound, completions := false, 0
-			app, err := gateway.NewWithConfig(gateway.Config{
-				Routes: []gateway.Route{{Prefix: "/api/", Upstream: target}}, Transport: p,
-				Middlewares: []gateway.Middleware{func(next http.Handler) http.Handler {
+			app, err := edgekit.NewWithConfig(edgekit.Config{
+				Routes: []edgekit.Route{{Prefix: "/api/", Upstream: target}}, Transport: p,
+				Middlewares: []edgekit.Middleware{func(next http.Handler) http.Handler {
 					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						defer func() { unwound = true }()
 						next.ServeHTTP(w, r)
 					})
 				}},
-				Extensions: []any{completionFunc(func(rc *gateway.RequestContext, outcome gateway.Outcome) {
+				Extensions: []any{completionFunc(func(rc *edgekit.RequestContext, outcome edgekit.Outcome) {
 					completions++
 					if !unwound || !errors.Is(outcome.Err, ErrDenied) || outcome.Aborted {
 						t.Errorf("lost denial or completion semantics: unwound=%v outcome=%+v", unwound, outcome)

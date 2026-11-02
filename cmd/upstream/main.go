@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"os"
 
-	"example.com/go-gateway-starter/internal/safelog"
+	"github.com/go-edgekit/edgekit/internal/safelog"
 )
 
 func main() {

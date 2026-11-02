@@ -16,17 +16,17 @@ import (
 	"sync/atomic"
 	"testing"
 
-	gateway "example.com/go-gateway-starter"
-	"example.com/go-gateway-starter/extensions/outboundsign"
+	"github.com/go-edgekit/edgekit"
+	"github.com/go-edgekit/edgekit/extensions/outboundsign"
 )
 
 type observer struct {
-	complete func(context.Context, *gateway.RequestContext, gateway.Outcome)
+	complete func(context.Context, *edgekit.RequestContext, edgekit.Outcome)
 	response func()
 	outbound func(*http.Request)
 }
 
-func (o observer) OnBeforeUpstream(_ context.Context, _ *gateway.RequestContext, r *http.Request) error {
+func (o observer) OnBeforeUpstream(_ context.Context, _ *edgekit.RequestContext, r *http.Request) error {
 	if o.outbound != nil {
 		o.outbound(r)
 	}
@@ -43,13 +43,13 @@ func (b *countedBody) Read(p []byte) (int, error) {
 	return b.ReadCloser.Read(p)
 }
 
-func (o observer) OnComplete(ctx context.Context, rc *gateway.RequestContext, outcome gateway.Outcome) {
+func (o observer) OnComplete(ctx context.Context, rc *edgekit.RequestContext, outcome edgekit.Outcome) {
 	if o.complete != nil {
 		o.complete(ctx, rc, outcome)
 	}
 }
 
-func (o observer) OnUpstreamResponse(context.Context, *gateway.RequestContext, *http.Response) error {
+func (o observer) OnUpstreamResponse(context.Context, *edgekit.RequestContext, *http.Response) error {
 	if o.response != nil {
 		o.response()
 	}
@@ -105,12 +105,12 @@ func TestSignsRewrittenDestinationAndEscapedURIWithoutChangingInboundRequest(t *
 			var unwound bool
 			var body *countedBody
 			completions := 0
-			app, err := gateway.NewWithConfig(gateway.Config{
-				Routes: []gateway.Route{{
+			app, err := edgekit.NewWithConfig(edgekit.Config{
+				Routes: []edgekit.Route{{
 					Prefix: "/api/", Upstream: target,
-					Middlewares: []gateway.Middleware{routeMiddleware, func(next http.Handler) http.Handler {
+					Middlewares: []edgekit.Middleware{routeMiddleware, func(next http.Handler) http.Handler {
 						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-							rc, _ := gateway.FromContext(r.Context())
+							rc, _ := edgekit.FromContext(r.Context())
 							if prefix, ok := rc.RoutePrefix(); !ok || prefix != "/api/" {
 								t.Fatal("route metadata missing before signing middleware unwinds")
 							}
@@ -126,7 +126,7 @@ func TestSignsRewrittenDestinationAndEscapedURIWithoutChangingInboundRequest(t *
 					if body.reads != 0 || r.Header.Get("X-Gateway-Signature") == "" {
 						t.Fatal("signer read the body or failed to set a signature before transport")
 					}
-				}, complete: func(_ context.Context, rc *gateway.RequestContext, outcome gateway.Outcome) {
+				}, complete: func(_ context.Context, rc *edgekit.RequestContext, outcome edgekit.Outcome) {
 					completions++
 					if !unwound || outcome.Err != nil || outcome.Aborted {
 						t.Fatalf("unexpected completion: unwound=%v outcome=%+v", unwound, outcome)
@@ -180,7 +180,7 @@ func TestSigningFailurePreventsForwardingAndCompletesAfterUnwind(t *testing.T) {
 			}))
 			defer upstream.Close()
 			signer := outboundsign.New()
-			route := gateway.Route{Prefix: "/api/", Upstream: parseURL(t, upstream.URL)}
+			route := edgekit.Route{Prefix: "/api/", Upstream: parseURL(t, upstream.URL)}
 			if name == "empty key" {
 				route.Middlewares = append(route.Middlewares, signer.WithKey(nil))
 			}
@@ -201,11 +201,11 @@ func TestSigningFailurePreventsForwardingAndCompletesAfterUnwind(t *testing.T) {
 				})
 			})
 			completions := 0
-			app, err := gateway.NewWithConfig(gateway.Config{
-				Routes: []gateway.Route{route},
+			app, err := edgekit.NewWithConfig(edgekit.Config{
+				Routes: []edgekit.Route{route},
 				Extensions: []any{signer, observer{
 					response: func() { t.Fatal("response hook ran after signing failed") },
-					complete: func(ctx context.Context, rc *gateway.RequestContext, outcome gateway.Outcome) {
+					complete: func(ctx context.Context, rc *edgekit.RequestContext, outcome edgekit.Outcome) {
 						completions++
 						if !unwound || outcome.Err == nil || outcome.Aborted {
 							t.Fatalf("unexpected completion: unwound=%v outcome=%+v", unwound, outcome)
@@ -247,10 +247,10 @@ func TestConcurrentRoutesUseTheirOwnSigningKeys(t *testing.T) {
 	defer upstream.Close()
 	signer := outboundsign.New()
 	target := parseURL(t, upstream.URL)
-	app, err := gateway.NewWithConfig(gateway.Config{
-		Routes: []gateway.Route{
-			{Prefix: "/one/", Upstream: target, Middlewares: []gateway.Middleware{signer.WithKey([]byte("first key"))}},
-			{Prefix: "/two/", Upstream: target, Middlewares: []gateway.Middleware{signer.WithKey([]byte("second key"))}},
+	app, err := edgekit.NewWithConfig(edgekit.Config{
+		Routes: []edgekit.Route{
+			{Prefix: "/one/", Upstream: target, Middlewares: []edgekit.Middleware{signer.WithKey([]byte("first key"))}},
+			{Prefix: "/two/", Upstream: target, Middlewares: []edgekit.Middleware{signer.WithKey([]byte("second key"))}},
 		},
 		Extensions: []any{signer}, // This extension implements only the outbound hook.
 	})

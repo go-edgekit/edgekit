@@ -11,13 +11,13 @@ import (
 	"sync/atomic"
 	"testing"
 
-	gateway "example.com/go-gateway-starter"
-	"example.com/go-gateway-starter/extensions/bodylimit"
+	"github.com/go-edgekit/edgekit"
+	"github.com/go-edgekit/edgekit/extensions/bodylimit"
 )
 
-type completionFunc func(gateway.Outcome)
+type completionFunc func(edgekit.Outcome)
 
-func (f completionFunc) OnComplete(_ context.Context, _ *gateway.RequestContext, outcome gateway.Outcome) {
+func (f completionFunc) OnComplete(_ context.Context, _ *edgekit.RequestContext, outcome edgekit.Outcome) {
 	f(outcome)
 }
 
@@ -53,18 +53,18 @@ func TestGatewayBodyLimits(t *testing.T) {
 			transport.Proxy = nil
 			defer transport.CloseIdleConnections()
 			completions := 0
-			var outcome gateway.Outcome
+			var outcome edgekit.Outcome
 			unwound := false
-			app, err := gateway.NewWithConfig(gateway.Config{
-				Routes:    []gateway.Route{{Prefix: "/api/", Upstream: target, Middlewares: []gateway.Middleware{bodylimit.New(tc.limit)}}},
+			app, err := edgekit.NewWithConfig(edgekit.Config{
+				Routes:    []edgekit.Route{{Prefix: "/api/", Upstream: target, Middlewares: []edgekit.Middleware{bodylimit.New(tc.limit)}}},
 				Transport: transport,
-				Middlewares: []gateway.Middleware{func(next http.Handler) http.Handler {
+				Middlewares: []edgekit.Middleware{func(next http.Handler) http.Handler {
 					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						defer func() { unwound = true }()
 						next.ServeHTTP(w, r)
 					})
 				}},
-				Extensions: []any{completionFunc(func(got gateway.Outcome) {
+				Extensions: []any{completionFunc(func(got edgekit.Outcome) {
 					completions++
 					outcome = got
 					if !unwound {
