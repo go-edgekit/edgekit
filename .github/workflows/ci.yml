@@ -45,12 +45,9 @@ jobs:
           # new-from-rev in .golangci.yml needs the history.
           fetch-depth: 0
           persist-credentials: false
-      # flake.lock pins the linter versions.
+      # flake.lock pins the linter versions. Do not add a Nix store cache:
+      # the upload takes longer than a download from cache.nixos.org.
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
-      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
-        with:
-          # Use only the GitHub Actions cache; FlakeHub needs an account.
-          use-flakehub: false
       - run: nix develop -c just lint
       - run: nix develop -c just actionlint
       - run: nix develop -c just zizmor
