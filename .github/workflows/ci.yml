@@ -8,12 +8,20 @@ on:
     - cron: "0 3 * * 1"
   workflow_dispatch:
 
-permissions:
-  contents: read
+# Each job states the permissions that it needs.
+permissions: {}
+
+# A new push to a pull request makes the earlier run useless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -39,6 +47,9 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -67,6 +78,9 @@ jobs:
 
   security:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -92,3 +106,17 @@ jobs:
       - if: steps.govulncheck-cache.outputs.cache-hit != 'true'
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
       - run: just security
+
+  # The ruleset requires only this job. Thus a change to the jobs or to the
+  # Go version matrix does not need a change to the ruleset.
+  required:
+    # A skipped required check counts as a pass. Thus this job must run, and
+    # fail, also when a job that it needs fails or is cancelled.
+    if: always()
+    needs: [test, lint, security]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1
