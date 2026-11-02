@@ -21,12 +21,17 @@ jobs:
         go-version: ["1.26.x", "1.27.x"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go-version }}
           # Fetch current security patches instead of using a stale runner toolchain.
           check-latest: true
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          # Keep in sync with the just version in flake.lock.
+          just-version: "1.58.0"
       - run: just test
       - run: just race
       - run: just vet
@@ -39,6 +44,7 @@ jobs:
         with:
           # new-from-rev in .golangci.yml needs the history.
           fetch-depth: 0
+          persist-credentials: false
       # flake.lock pins the linter versions.
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
       - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
@@ -47,17 +53,26 @@ jobs:
           use-flakehub: false
       - run: nix develop -c just lint
       - run: nix develop -c just actionlint
+      - run: nix develop -c just zizmor
+        env:
+          # Enables the online audits, for example known-vulnerable-actions.
+          GH_TOKEN: ${{ github.token }}
       - run: nix flake check --no-build --all-systems
 
   security:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # govulncheck checks the standard library of the toolchain that runs it.
           go-version: "1.27.x"
           check-latest: true
       - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+        with:
+          # Keep in sync with the just version in flake.lock.
+          just-version: "1.58.0"
       - run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
       - run: just security
