@@ -40,6 +40,9 @@ or change the glossary deliberately. Do not use the word.
 - Do not commit, push, or merge unless asked.
 - Fix the cause of a failing check. Do not delete or weaken tests, add
   `//nolint`, or skip a check to make it pass.
+- During the rewrite, remove a prototype test only together with its row in
+  the [rewrite ledger](docs/rewrite-ledger.md). The row names the replacement
+  test or the ADR that drops the behavior.
 - A performance claim needs a benchmark, with `benchstat` output from before
   and after the change.
 
