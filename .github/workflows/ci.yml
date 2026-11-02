@@ -72,6 +72,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: setup-go
         with:
           # govulncheck checks the standard library of the toolchain that runs it.
           go-version: "1.27.x"
@@ -83,5 +84,11 @@ jobs:
         with:
           # Keep in sync with the just version in flake.lock.
           just-version: "1.58.0"
-      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: govulncheck-cache
+        with:
+          path: ~/go/bin/govulncheck
+          key: govulncheck-v1.3.0-${{ runner.os }}-go${{ steps.setup-go.outputs.go-version }}
+      - if: steps.govulncheck-cache.outputs.cache-hit != 'true'
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
       - run: just security
