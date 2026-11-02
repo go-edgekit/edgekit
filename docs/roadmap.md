@@ -10,6 +10,22 @@ Done: ADRs 0011–0016, status changes for 0002 and 0006–0008, and the [contex
 
 ## 2. Rewrite the core
 
+The rewrite replaces the prototype in place on `main`, in slices. The prototype is kept at the git tag `prototype-final`. Each slice replaces code together with its tests, and `just check` passes after each slice. A slice removes extensions that the new core breaks, and their tests stay pending in the [rewrite ledger](rewrite-ledger.md) until a later slice rewrites them. Tests are rewritten against the new API, not ported, and the ledger tracks each prototype test.
+
+Slices:
+
+0. Groundwork: tag, ledger, and the rewrite rule in AGENTS.md. Done.
+1. Proxy core: routing, static upstream selection, forwarding, managed and hop-by-hop headers, transport, and cancellation.
+2. Lifecycle hooks and request state, including the rename of the hook-provider registration.
+3. Typed rejections, the replaceable renderer, and typed failures (R10).
+4. Core-owned hardened server. `cmd/gateway` becomes a testable `Example` and an `examples/` program.
+5. Body limit, admission, and egress as core protections.
+6. Bundled extensions: access log and outbound signing. The `headers` demonstration is removed.
+
+The rewrite is done when every ledger row is covered or dropped, the ledger and its AGENTS.md rule are deleted, no document calls the code a prototype, and `just check` passes. The Go API stays provisional until v1.
+
+Scope of the rewrite:
+
 - Public module path and Apache-2.0 license ([ADR-0014](adr/0014-multi-module-repository.md)). Done: `github.com/go-edgekit/edgekit` with the Apache-2.0 license.
 - Secure defaults R1–R5, R7, R8, and R9; opaque/absolute-form/`CONNECT` rejection; no transparent transport compression; extension-managed headers; body limit, admission, and egress as core protections ([ADR-0012](adr/0012-secure-defaults-and-configurable-protections.md)).
 - Core-owned hardened server ([ADR-0016](adr/0016-core-owns-the-inbound-server.md)).
