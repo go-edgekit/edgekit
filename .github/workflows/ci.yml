@@ -18,7 +18,9 @@ concurrency:
 
 jobs:
   test:
-    name: Test (Go ${{ matrix.go-version }})
+    # GitHub appends the matrix values, for example "Test (1.27.x)". A matrix
+    # expression in the name makes the run graph show the job ID instead.
+    name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
