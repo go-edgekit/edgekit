@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   test:
+    name: Test (Go ${{ matrix.go-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -28,15 +29,18 @@ jobs:
         # The minimum Go version in go.mod and the latest release.
         go-version: ["1.26.x", "1.27.x"]
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go-version }}
           # Fetch current security patches instead of using a stale runner toolchain.
           check-latest: true
-      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: Set up just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
         with:
           # Keep in sync with the just version in flake.lock.
           just-version: "1.58.0"
@@ -46,22 +50,26 @@ jobs:
       - run: just tidy-check
 
   lint:
+    name: Lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # new-from-rev in .golangci.yml needs the history.
           fetch-depth: 0
           persist-credentials: false
       # flake.lock pins the linter versions. Do not add a Nix store cache:
       # the upload takes longer than a download from cache.nixos.org.
-      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
       # The key changes on every commit, so each run saves a fresh cache.
       # golangci-lint and Go check each cache entry against the file contents.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore lint cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/go-build
@@ -77,15 +85,18 @@ jobs:
       - run: nix flake check --no-build --all-systems
 
   security:
+    name: Vulnerability check
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         id: setup-go
         with:
           # govulncheck checks the standard library of the toolchain that runs it.
@@ -94,22 +105,26 @@ jobs:
           # The test job uses the same cache key. A cache key is saved only
           # once, so this job must not save a cache without the race build.
           cache: false
-      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+      - name: Set up just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
         with:
           # Keep in sync with the just version in flake.lock.
           just-version: "1.58.0"
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore govulncheck
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: govulncheck-cache
         with:
           path: ~/go/bin/govulncheck
           key: govulncheck-v1.3.0-${{ runner.os }}-go${{ steps.setup-go.outputs.go-version }}
-      - if: steps.govulncheck-cache.outputs.cache-hit != 'true'
+      - name: Install govulncheck
+        if: steps.govulncheck-cache.outputs.cache-hit != 'true'
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
       - run: just security
 
   # The ruleset requires only this job. Thus a change to the jobs or to the
   # Go version matrix does not need a change to the ruleset.
   required:
+    name: Required checks
     # A skipped required check counts as a pass. Thus this job must run, and
     # fail, also when a job that it needs fails or is cancelled.
     if: always()
@@ -118,5 +133,6 @@ jobs:
     timeout-minutes: 5
     permissions: {}
     steps:
-      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+      - name: Fail if a needed job did not pass
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
         run: exit 1
