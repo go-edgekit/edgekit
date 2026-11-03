@@ -8,7 +8,7 @@ An earlier gateway survey supports our current direction: a small programmable G
 
 Its recommended release scope and API sketches should not be adopted as a package. They move toward a turnkey gateway distribution and introduce abstractions that our scaffold does not yet need.
 
-This assessment compares the survey with the [ADRs](../adr/README.md), current implementation, and [access-log experiment](../../extensions/accesslog/README.md). It does not change ADR statuses, stabilize public interfaces, or expand the implementation milestone. ADRs 0003, 0004, 0005, and 0009 are accepted; the other existing ADRs remain proposed.
+This assessment compares the survey with the [ADRs](../adr/README.md), current implementation, and [access-log experiment](https://github.com/go-edgekit/edgekit/blob/prototype-final/extensions/accesslog/README.md). It does not change ADR statuses, stabilize public interfaces, or expand the implementation milestone. ADRs 0003, 0004, 0005, and 0009 are accepted; the other existing ADRs remain proposed.
 
 ## Alignment with current plans
 

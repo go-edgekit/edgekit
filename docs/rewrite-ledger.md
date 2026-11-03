@@ -6,7 +6,9 @@ The prototype is kept at the git tag `prototype-final`. Its tests are the behavi
 
 ## Rules
 
-- Each prototype test has one row. Remove a prototype test only in the same change that sets its row to _covered_ or _dropped_.
+- Each prototype test has one row. Remove a prototype test only in the same change that sets its row to _covered_ or _dropped_, or as the next rule permits.
+- A slice can remove a prototype test together with the code that the test needs, when the slice removes or breaks that code. The row stays `pending`. The test stays readable at `prototype-final`.
+- When parts of one test belong to different slices, split the row. Each part gets its own row in its slice, marked _(split)_.
 - _Covered_: list the new tests that examine the same conditions. Test names can change. The conditions cannot.
 - _Dropped_: name the ADR that removes or changes the behavior. If a test shows that an accepted ADR is wrong, stop and write a superseding ADR.
 - When a new test differs from the prototype behavior because of an ADR, write the old and new behavior in the row.
@@ -21,17 +23,27 @@ Status values: `pending`, `covered`, `dropped`.
 
 | Prototype test | Behavior | Status | New tests | ADR |
 | --- | --- | --- | --- | --- |
-| `gateway_test.go:TestProxyForwardsRequestAndAppliesRouteMiddleware` | A matched route forwards the request upstream and runs its route middleware | pending | | |
-| `gateway_test.go:TestGlobalAndRouteMiddlewareOrder` | Global middleware wraps route middleware in registration order | pending | | 0004 |
-| `gateway_test.go:TestInvalidRoute` | Construction rejects invalid route configuration | pending | | 0007 |
-| `proxy_safety_test.go:TestForwardingTrustAndHopByHopHeaders` | Inbound forwarding headers are not trusted; hop-by-hop headers are removed | pending | | 0012 |
-| `proxy_safety_test.go:TestTransportReusesConnectionsAcrossRoutes` | Routes to the same upstream share one connection pool | pending | | |
-| `proxy_safety_test.go:TestResponseHeaderTimeoutCancelsUpstream` | The response-header timeout cancels the upstream request | pending | | 0012 |
-| `proxy_safety_test.go:TestCancellationWhileWaitingForConnectionPool` | Client cancellation ends a wait for a pooled connection | pending | | |
-| `proxy_safety_test.go:TestRequestBodyStreamsBeforeClientEOF` | The request body streams upstream before the client finishes sending | pending | | |
-| `cmd/gateway/main_test.go:TestUpstreamTransportPolicy` | The upstream transport has bounded timeouts and pool settings | pending | | 0012 |
-| `cmd/gateway/main_test.go:TestHeaderTimeoutDoesNotLimitResponseStream` | The response-header timeout does not cut a streaming response body | pending | | 0012 |
-| `cmd/gateway/main_test.go:TestUpstreamDialRespectsCanceledContext` | The upstream dial stops when the request context is canceled, also before a connection exists | pending | | |
+| `gateway_test.go:TestProxyForwardsRequestAndAppliesRouteMiddleware` | A matched route forwards the request upstream and runs its route middleware | covered | `gateway_test.go:TestProxyForwardsRequestAndAppliesRouteMiddleware`, `gateway_test.go:TestRouteMatching`, `gateway_test.go:TestRouteMiss` | 0008 |
+| `gateway_test.go:TestGlobalAndRouteMiddlewareOrder` | Global middleware wraps route middleware in registration order | covered | `gateway_test.go:TestGlobalAndRouteMiddlewareOrder`, `gateway_test.go:TestGlobalMiddlewareRunsForRouteMiss` | 0004 |
+| `gateway_test.go:TestInvalidRoute` | Construction rejects invalid route configuration | covered | `gateway_test.go:TestInvalidConfiguration`, `gateway_test.go:TestInvalidConfigurationReportsAllProblems`, `gateway_test.go:TestMiddlewareIsCalledOnceForValidConfiguration`, `gateway_test.go:TestMiddlewareIsNotCalledForStructuralProblem`, `gateway_test.go:TestStaticUpstreamAcceptsValidURL`, `gateway_test.go:TestStaticUpstreamRejectsInvalidURL`, `gateway_test.go:TestConfigurationIsCopied` | 0007 |
+| `proxy_safety_test.go:TestForwardingTrustAndHopByHopHeaders` | Inbound forwarding headers are not trusted; hop-by-hop headers are removed | covered | `inbound_test.go:TestForwardingTrustAndHopByHopHeaders`, `inbound_test.go:TestGatewayDoesNotChangeInboundRequest` | 0012 |
+| `proxy_safety_test.go:TestTransportReusesConnectionsAcrossRoutes` | Routes to the same upstream share one connection pool | covered | `transport_test.go:TestTransportReusesConnectionsAcrossRoutes`, `transport_test.go:TestCloseIdleConnections` | |
+| `proxy_safety_test.go:TestResponseHeaderTimeoutCancelsUpstream` | The response-header timeout cancels the upstream request | covered | `transport_test.go:TestResponseHeaderTimeoutCancelsUpstream` | 0012 |
+| `proxy_safety_test.go:TestCancellationWhileWaitingForConnectionPool` | Client cancellation ends a wait for a pooled connection | covered | `transport_test.go:TestCancellationWhileWaitingForConnectionPool` | |
+| `proxy_safety_test.go:TestRequestBodyStreamsBeforeClientEOF` | The request body streams upstream before the client finishes sending | covered | `transport_test.go:TestRequestBodyStreamsBeforeClientEOF` | 0002 |
+| `cmd/gateway/main_test.go:TestUpstreamTransportPolicy` | The upstream transport has bounded timeouts and pool settings | covered | `transport_test.go:TestUpstreamTransportPolicy`, `transport_test.go:TestNoTransparentCompression` | 0012 |
+| `cmd/gateway/main_test.go:TestHeaderTimeoutDoesNotLimitResponseStream` | The response-header timeout does not cut a streaming response body | covered | `transport_test.go:TestHeaderTimeoutDoesNotLimitResponseStream` | 0012 |
+| `cmd/gateway/main_test.go:TestUpstreamDialRespectsCanceledContext` | The upstream dial stops when the request context is canceled, also before a connection exists | covered | `transport_test.go:TestUpstreamDialRespectsCanceledContext` | |
+| `diagnostics_test.go:TestGatewayConstructionDoesNotReconfigureProcessLogging` | Gateway construction does not change process-global logging | covered | `gateway_test.go:TestGatewayConstructionDoesNotReconfigureProcessLogging` | |
+
+Changes from the prototype behavior:
+
+- `TestForwardingTrustAndHopByHopHeaders`. Old: the gateway removed only `Forwarded`, `X-Forwarded-For`, `-Host`, `-Proto`, and `X-Real-IP`. Other identity headers, such as `X-Forwarded-Port` and `True-Client-IP`, reached the upstream, and `Alt-Svc` reached the client. New: the gateway removes all identity headers and the configured managed headers before middleware runs, removes their names from `Connection`, and removes `Alt-Svc` and hop-by-hop fields from responses, informational responses, and trailers (ADR-0012, R4 and R7). Middleware must not change the request that it gets, as `http.Handler` requires; the gateway does not change the caller's request.
+- `TestUpstreamTransportPolicy`. Old: the bounded transport was example code in `cmd/gateway`, with `MaxConnsPerHost` 64. A gateway without a configured transport used `http.DefaultTransport`, with the environment proxy and transparent compression. New: `NewTransport` is the default transport of every gateway. `MaxConnsPerHost` is 0 (no limit), because a limit makes requests wait for the pool with no bound except the client context. Admission (slice 5) limits concurrency. Compression is off, and `New` rejects an `*http.Transport` with compression (ADR-0012).
+- `TestInvalidRoute`. Old: errors contained the route prefix. New: errors wrap `ErrInvalidConfiguration`, give the location only, and report all problems together. `New` calls no middleware function when the structure of the configuration is not valid.
+- `TestResponseHeaderTimeoutCancelsUpstream` and `TestRequestBodyStreamsBeforeClientEOF` are split. The completion part and the admission part are rows in slices 2 and 5.
+
+New tests without a prototype row: `inbound_test.go:TestSecureDefaultsRejectBeforeMiddleware` and `inbound_test.go:TestRequestFromOutsideServerNeedsOriginForm` (request-target rejection, `CONNECT`, R1 to R3), `inbound_test.go:TestQueryIsForwardedUnchanged`, `inbound_test.go:TestMiddlewareQueryIsForwardedUnchanged`, `inbound_test.go:TestConnectionCannotRemoveManagedHeader`, `inbound_test.go:TestRequestTrailersCannotCarryRemovedHeaders`, `response_test.go:TestInformationalResponseHeadersAreSanitized`, `response_test.go:TestInformationalResponseKeepsMiddlewareHeaders`, `response_test.go:TestTrailersAreSanitized`, `response_test.go:TestProtocolUpgradeIsForwarded`, `gateway_test.go:TestCustomUpstreamSelector` (ADR-0008), and the `Example` functions in `example_test.go`.
 
 ## Slice 2: lifecycle hooks and request state
 
@@ -53,6 +65,7 @@ Status values: `pending`, `covered`, `dropped`.
 | `outbound_test.go:TestOutboundTransportFailureClosesBodyWithoutDelegating` | An outbound hook failure stops later hooks, closes the body, and does not call the transport | pending | | 0003 |
 | `proxy_safety_test.go:TestConfiguredTransportWithAndWithoutOutboundHooks` | A configured transport is used with and without outbound hooks | pending | | 0003 |
 | `proxy_safety_test.go:TestClientCancellationReachesUpstreamAndCompletion` | Client cancellation reaches the upstream and is visible at completion | pending | | 0009 |
+| `proxy_safety_test.go:TestResponseHeaderTimeoutCancelsUpstream` _(split)_ | A response-header timeout is a timeout error at completion, and completion runs after middleware unwinds | pending | | 0009 |
 | `cmd/gateway/resource_limits_test.go:TestUpstreamHeaderLimitBeforeResponseHooks` | Oversized upstream response headers fail before response hooks run, on HTTP/1.1 and HTTP/2 | pending | | 0012 |
 
 ## Slice 3: rejections, renderer, and typed failures
@@ -61,7 +74,6 @@ Status values: `pending`, `covered`, `dropped`.
 | --- | --- | --- | --- | --- |
 | `diagnostics_test.go:TestProxyStreamDiagnosticOmitsDetailsAndPreservesAbort` | A stream failure diagnostic has no details and does not change the abort or completion | pending | | 0009 |
 | `diagnostics_test.go:TestProxyErrorRemainsAvailableWithoutAutomaticLogging` | The original proxy error stays available to the caller and is not logged automatically | pending | | 0009, 0013 |
-| `diagnostics_test.go:TestGatewayConstructionDoesNotReconfigureProcessLogging` | Gateway construction does not change process-global logging | pending | | |
 
 ## Slice 4: hardened server
 
@@ -88,6 +100,7 @@ Status values: `pending`, `covered`, `dropped`.
 | `extensions/admission/integration_test.go:TestGatewaySaturationIsLocalAndCompletionRunsAfterUnwind` | A saturation rejection is local; completion runs after middleware unwinds | pending | | 0009 |
 | `extensions/admission/integration_test.go:TestHTTP2StreamsShareBudgetAndKeepSlotsWhileStreaming` | HTTP/2 streams share the budget and keep their slots while they stream | pending | | |
 | `extensions/admission/integration_test.go:TestCancellationDuringPoolAcquisitionReleasesAdmissionSlot` | Cancellation while waiting for a pooled connection releases the slot | pending | | |
+| `proxy_safety_test.go:TestRequestBodyStreamsBeforeClientEOF` _(split)_ | A slow streaming upload keeps its admission slot until it ends; another request gets 503 | pending | | 0012 |
 | `extensions/egress/egress_test.go:TestInvalidConfiguration` | Construction rejects invalid egress configuration | pending | | 0007 |
 | `extensions/egress/egress_test.go:TestOriginNormalization` | Allowed origins are normalized before comparison | pending | | |
 | `extensions/egress/egress_test.go:TestDeniedRequestClosesBodyWithoutDelegation` | A denied request closes its body and is not sent | pending | | |

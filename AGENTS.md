@@ -42,13 +42,17 @@ or change the glossary deliberately. Do not use the word.
   `//nolint`, or skip a check to make it pass.
 - During the rewrite, remove a prototype test only together with its row in
   the [rewrite ledger](docs/rewrite-ledger.md). The row names the replacement
-  test or the ADR that drops the behavior.
+  test or the ADR that drops the behavior. A slice can also remove a test
+  together with the code that the slice removes or breaks. Then the row stays
+  `pending`.
 - A performance claim needs a benchmark, with `benchstat` output from before
   and after the change.
 
 ## Go style
 
-- Put each field of a multi-line struct literal on its own line.
+- Follow the [Google Go Style Guide](https://google.github.io/styleguide/go/).
+  The rules below add to it.
+- In a multi-line composite literal, put each field or element on its own line.
 - Use blank lines to separate guard clauses, the main work, and the return.
   Do not use consecutive blank lines, or blank lines at the start or end of a
   block.
@@ -80,6 +84,8 @@ or change the glossary deliberately. Do not use the word.
   boundary cases.
 - Use table-driven tests with named cases and `t.Run` when the cases share
   setup and assertions. Write a direct test when a table is less clear.
+- Write each case of a table-driven test as a multi-line literal, with one
+  field on each line.
 - Keep assertions in the test body. Use helpers for setup only.
 
 ## Report

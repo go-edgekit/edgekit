@@ -1,6 +1,8 @@
 # Direct upstream destination policy
 
-`egress` is an optional transport package for explicit origin and IP-network allowlists. It uses the existing `edgekit.Config.Transport` boundary; it adds no framework configuration or lifecycle hooks. It is opt-in and is **not enabled by the demo executable**. A deployment must choose its actual allowed destinations, including private networks where needed.
+**Status:** Prototype. This package and this document use the prototype API at the git tag `prototype-final`. Slice 5 of the [roadmap](../../docs/roadmap.md) moves this protection into the core and rewrites it.
+
+`egress` is an optional transport package for explicit origin and IP-network allowlists. It uses the existing `edgekit.Config.Transport` boundary; it adds no framework configuration or lifecycle hooks. It is opt-in. A deployment must choose its actual allowed destinations, including private networks where needed.
 
 ## Registration
 

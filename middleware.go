@@ -1,18 +1,43 @@
 package edgekit
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+	"slices"
+)
 
-// Middleware wraps an HTTP handler to inspect, modify, or reject requests.
-// This uses the standard net/http model to keep extensions interoperable.
-// Registered middleware must call next synchronously and at most once. Returning
-// while downstream work continues is not supported by the completion lifecycle.
-type Middleware func(http.Handler) http.Handler
+// Middleware wraps HTTP handling. It can examine or change the request, write
+// a response, or end handling early when it does not call next.
+//
+// Middleware uses the standard net/http model, so existing middleware packages
+// work without changes. A middleware must call next synchronously and at most
+// once. Middleware that returns while the next handler continues, such as
+// [http.TimeoutHandler], is not supported.
+//
+// A middleware must not change the request that it gets, as [http.Handler]
+// also requires. The request can be the request that the caller gave to
+// [Gateway.ServeHTTP]. To change the request, make a copy with
+// [http.Request.Clone], change the copy, and give the copy to next.
+//
+// The gateway calls each middleware function one time, in [New], and uses the
+// returned handler for all requests. The returned handler must be safe for
+// concurrent use. It must not be nil.
+type Middleware func(next http.Handler) http.Handler
 
-// Chain applies middleware in the order provided: the first is outermost
-// and runs first on the request path (and last on the response path).
-func Chain(handler http.Handler, middlewares ...Middleware) http.Handler {
-	for i := len(middlewares) - 1; i >= 0; i-- {
-		handler = middlewares[i](handler)
+// chain wraps handler so that the first middleware is the outermost one.
+func chain(handler http.Handler, middleware []Middleware) (http.Handler, error) {
+	for i, m := range slices.Backward(middleware) {
+		handler = m(handler)
+		if handler == nil {
+			return nil, fmt.Errorf("middleware %d: returned a nil handler", i)
+		}
 	}
-	return handler
+
+	return handler, nil
+}
+
+// isNil exists for slices.IndexFunc, because function values are not
+// comparable.
+func isNil(m Middleware) bool {
+	return m == nil
 }

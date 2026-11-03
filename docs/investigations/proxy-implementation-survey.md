@@ -98,7 +98,7 @@ The diagram combines the phases that appear across the surveyed code. Each phase
 | Phase | Go stdlib `ReverseProxy` | This gateway today |
 | --- | --- | --- |
 | ① accept | — | Plain `ListenAndServe` in the example |
-| ② parse | `http.Server` (1 MiB headers, 500 header values, h2 250 streams by default) | 5s header-read timeout, 64 KiB headers ([main.go](../../cmd/gateway/main.go)) |
+| ② parse | `http.Server` (1 MiB headers, 500 header values, h2 250 streams by default) | 5s header-read timeout, 64 KiB headers ([main.go](https://github.com/go-edgekit/edgekit/blob/prototype-final/cmd/gateway/main.go)) |
 | ③ edge normalization | `ServeMux` cleans dot-segments in the *escaped* path only; `ReverseProxy` rejects `CONNECT` | Relies on `ServeMux` behavior ([E1](#e1-path-confusion)) |
 | ④ client identity | `Rewrite` removes `Forwarded`/`X-Forwarded-*` before the callback | Rebuilds from the peer; drops `X-Real-IP` |
 | ⑤ route match | `ServeMux` prefix | Prefix routes; one upstream per route |
@@ -142,7 +142,7 @@ Source: `src/net/http/httputil/reverseproxy.go` (1010 lines).
 - **Hop-by-hop:** `Connection`-listed names, then `Connection`, `Proxy-Connection`, `Keep-Alive`, `Proxy-Authenticate`, `Proxy-Authorization`, `Te`, `Trailer`, `Transfer-Encoding`, `Upgrade`. It restores `Te: trailers` if the *inbound* request asked for trailers, and restores `Connection: Upgrade` + `Upgrade: <type>` for HTTP/1 upgrades. It rejects `Upgrade` on HTTP/2+ requests and does not forward `h2c` upgrades.
 - **Query:** `cleanQueryParams` re-encodes the query when it contains `;`, an invalid `%` escape, or more parameters than the default limit. In practice, unparsable pairs are **dropped silently** ([E2](#e2-query-semicolons)).
 - **`User-Agent`:** set to `""` when the client sent none, so Go's default UA is not added.
-- **1xx:** forwarded through `httptrace.Got1xxResponse`, which restores middleware-set headers after each 1xx. A mutex stops writes after `RoundTrip` returns.
+- **1xx:** forwarded through `httptrace.Got1xxResponse`. A mutex stops writes after `RoundTrip` returns. Up to Go 1.26, the handler writes the 1xx from the shared response header map and then clears the map. So headers that middleware set before the proxy go out with the 1xx and are missing from the final response (golang/go#81207, fixed on the Go development branch, not in Go 1.26.10). Hop-by-hop fields of a 1xx are not removed (golang/go#81319, open).
 - **101:** the response upgrade type must be printable and equal to the requested type. It hijacks through `http.NewResponseController`, and request-context cancellation closes the backend connection (golang/go#35559).
 - **Flush:** immediate (`-1`) for `text/event-stream` and for `ContentLength == -1`. Otherwise it uses `FlushInterval` (default 0 = no periodic flush).
 - **Trailers:** builds the `Trailer` announcement from `res.Trailer`. It flushes to force chunked encoding when trailers exist, and uses `http.TrailerPrefix` for trailers that were not announced.

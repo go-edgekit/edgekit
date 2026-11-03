@@ -54,7 +54,7 @@ The shared-context and access-log experiments demonstrate:
 
 The access-log middleware changes an inbound request header that is forwarded upstream; it does not validate a hook on the actual rewritten outbound request.
 
-The [outbound-signing experiment](../../extensions/outboundsign/README.md) separately demonstrates:
+The [outbound-signing experiment](https://github.com/go-edgekit/edgekit/blob/prototype-final/extensions/outboundsign/README.md) separately demonstrates:
 
 - Route middleware supplying private typed state to a provisional `BeforeUpstreamHook` after selection and rewriting.
 - The upstream receiving signatures for the rewritten destination, method, effective Host, and escaped URI, including base-path and query changes.

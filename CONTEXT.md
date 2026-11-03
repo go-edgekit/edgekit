@@ -24,7 +24,7 @@ A header whose meaning the gateway or an extension owns, such as a forwarding or
 _Avoid_: Trusted header
 
 **Extension point**:
-A place where the core lets outside code take part in handling: middleware, lifecycle hooks, the transport, and later upstream selection.
+A place where the core lets outside code take part in handling: middleware, lifecycle hooks, the transport, and upstream selection.
 
 **Middleware**:
 An extension point that wraps HTTP handling and may end it early.
@@ -61,8 +61,22 @@ The routes, extensions, and protections fixed when a gateway starts. Changing it
 _Avoid_: Policy data
 
 **Upstream selector**:
-An extension point that chooses the destination for a matched request. The default chooses the route's single static target.
+An extension point that chooses the upstream URL for a matched request. The default chooses the route's single static upstream URL.
 _Avoid_: Load balancer (one possible selector)
+
+**Upstream URL**:
+The absolute URL that an upstream selector returns for a request. Its path is a base path: the gateway adds the inbound path to it.
+_Avoid_: Target (ambiguous with request target), backend
+
+**Request target**:
+The target in the request line (RFC 9112, section 3.2). The core accepts only the origin form: a path with an optional query.
+_Avoid_: Target (alone)
+
+**Path policy**:
+The checks on the request path before routing. Reject mode refuses paths that an upstream can decode to a path different from the path that the router matched.
+
+**Identity header**:
+A header that states who the client is or where the request came from, such as `X-Forwarded-For` or `True-Client-IP`. A client can spoof it, so the core removes it from inbound requests and sets the forwarding headers from the direct peer.
 
 **Rejection**:
 A deliberate refusal to continue handling, carrying a status, response headers, and a public reason. It is distinct from an unexpected failure.

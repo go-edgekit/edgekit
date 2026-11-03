@@ -1,8 +1,9 @@
 # Threat model
 
 **Status:** Describes the target design from the [ADRs](adr/README.md). The
-prototype does not have all of the listed protections. The _Prototype_ column
-shows the gaps. This document does not claim production readiness.
+current code does not have all of the listed protections yet. The _Current
+code_ column shows the gaps. This document does not claim production
+readiness.
 
 ## Scope
 
@@ -62,18 +63,18 @@ upstream application.
 R numbers refer to the recommendations in the
 [proxy implementation survey](investigations/proxy-implementation-survey.md#recommendations-for-this-project).
 
-| ID | Threat | Target mitigation | Prototype |
+| ID | Threat | Target mitigation | Current code |
 | --- | --- | --- | --- |
-| T1 | **Request smuggling or parsing differences:** the gateway and the upstream read a different request. | Use the `net/http` parser and `ReverseProxy` ([ADR-0002](adr/0002-use-go-standard-http-proxy.md)). Reject opaque URIs, absolute-form targets, and `CONNECT`. Remove hop-by-hop headers in both directions. | Hop-by-hop removal only. Absolute-form targets are proxied. |
-| T2 | **Path confusion:** encoded dot-segments let a request reach a path outside its route. | Path policy before routing, reject mode by default (R1). Normalize mode forwards the normalized path. | Not mitigated. See experiment E1 in the survey. |
-| T3 | **Query confusion:** semicolons make the gateway drop query parameters silently. | Reject query semicolons by default (R2). | Not mitigated. See experiment E2. |
-| T4 | **Header spoofing:** a client sets forwarding, identity, or extension-owned headers that the upstream believes. | Rebuild forwarding headers from the direct peer. Reject header-name aliases (R3). Remove untrusted identity headers and managed headers before extensions run (R4). Trusted proxies are a configurable protection (R6). | Standard forwarding headers and `X-Real-IP` only. Aliases and other identity headers pass. |
-| T5 | **SSRF and egress bypass:** the gateway connects to a destination that the configuration does not allow. | Egress origin and network allowlists as a configurable protection. Check every DNS answer and dial the checked IP. No ambient environment proxy. | Opt-in [`extensions/egress`](../extensions/egress/README.md). The default transport uses the environment proxy. |
-| T6 | **Inbound resource exhaustion:** slow or large requests use all connections, memory, or capacity. | Header budgets and HTTP/2 limits (R8), progress-based idle deadlines (R9), and a request-body limit as secure defaults. Admission capacity as a configurable protection. Stream bodies; do not buffer them. | Example settings and opt-in [`bodylimit`](../extensions/bodylimit/README.md) and [`admission`](../extensions/admission/README.md). No idle deadlines. |
-| T7 | **Hostile or broken upstream:** large headers, hangs, compression bombs, or protocol hints that are wrong for the gateway's origin. | Transport timeouts and response-header limits. No transparent transport compression. Remove `Alt-Svc` (R7). | Example settings only. Transparent decompression is on. |
-| T8 | **Sensitive data in responses or logs.** | One renderer writes minimal `problem+json` bodies with no failure details ([ADR-0013](adr/0013-typed-rejections-and-replaceable-renderer.md)). Diagnostics go through `internal/safelog` as source-only events. | Generic error bodies and `safelog`. See the [diagnostic audit](investigations/sensitive-diagnostics.md). |
+| T1 | **Request smuggling or parsing differences:** the gateway and the upstream read a different request. | Use the `net/http` parser and `ReverseProxy` ([ADR-0002](adr/0002-use-go-standard-http-proxy.md)). Reject opaque URIs, absolute-form targets, and `CONNECT`. Remove hop-by-hop headers in both directions. | Done. The `Gateway` GoDoc in [gateway.go](../gateway.go) documents the deviation from RFC 9112. |
+| T2 | **Path confusion:** encoded dot-segments let a request reach a path outside its route. | Path policy before routing, reject mode by default (R1). Normalize mode forwards the normalized path. | Reject mode is done. Normalize mode is planned for slice 1b. |
+| T3 | **Query confusion:** semicolons make the gateway drop query parameters silently. | Reject query semicolons by default (R2). | Done. The gateway rejects each query that `url.ParseQuery` rejects, also for malformed percent-escapes and more than 10000 parameters, and forwards the raw query unchanged. The `Gateway` GoDoc documents the deviation. |
+| T4 | **Header spoofing:** a client sets forwarding, identity, or extension-owned headers that the upstream believes. | Rebuild forwarding headers from the direct peer. Reject header-name aliases (R3). Remove untrusted identity headers and managed headers before extensions run (R4). Trusted proxies are a configurable protection (R6). | Forwarding headers, identity headers, managed headers, and aliases are done, also for the names of request trailers. The embedder lists managed headers; extensions cannot declare them until slice 2. R6 is not done. The `Gateway` GoDoc documents the deviation from RFC 9110. |
+| T5 | **SSRF and egress bypass:** the gateway connects to a destination that the configuration does not allow. | Egress origin and network allowlists as a configurable protection. Check every DNS answer and dial the checked IP. No ambient environment proxy. | Opt-in [`extensions/egress`](../extensions/egress/README.md). The default transport does not use the environment proxy. |
+| T6 | **Inbound resource exhaustion:** slow or large requests use all connections, memory, or capacity. | Header budgets and HTTP/2 limits (R8), progress-based idle deadlines (R9), and a request-body limit as secure defaults. Admission capacity as a configurable protection. Stream bodies; do not buffer them. | Opt-in [`bodylimit`](../extensions/bodylimit/README.md) and [`admission`](../extensions/admission/README.md). The core has no server settings until slice 4. No idle deadlines. |
+| T7 | **Hostile or broken upstream:** large headers, hangs, compression bombs, or protocol hints that are wrong for the gateway's origin. | Transport timeouts and response-header limits. No transparent transport compression. Remove `Alt-Svc` (R7). | Done. `NewTransport` is the default transport. `Alt-Svc` and hop-by-hop fields are also removed from informational responses and trailers. Informational responses do not get the response headers that middleware set, and the final response keeps them. |
+| T8 | **Sensitive data in responses or logs.** | One renderer writes minimal `problem+json` bodies with no failure details ([ADR-0013](adr/0013-typed-rejections-and-replaceable-renderer.md)). Diagnostics go through `internal/safelog` as source-only events. | Plain-text error bodies with the status text only, and `safelog`. No renderer until slice 3. See the [diagnostic audit](investigations/sensitive-diagnostics.md). |
 | T9 | **Wrong execution facts:** a client cancellation or timeout is recorded as an upstream failure. This corrupts metrics and quota refunds. | Map errors to 504 and 499 (R5) from typed dial and request-written failures (R10), not from error text. | All failures are 502. |
-| T10 | **Extension mistakes:** an extension leaks secrets, keeps request state too long, or adds unsafe headers back. | Extensions use the public contract only. Per-request state is serial and private ([ADR-0005](adr/0005-per-request-gateway-context.md)). Documentation states that extensions are trusted code. | Same contract, but provisional. |
+| T10 | **Extension mistakes:** an extension leaks secrets, keeps request state too long, or adds unsafe headers back. | Extensions use the public contract only. Per-request state is serial and private ([ADR-0005](adr/0005-per-request-gateway-context.md)). Documentation states that extensions are trusted code. | Middleware, selector, and transport only. Lifecycle hooks and request state return in slice 2. |
 | T11 | **Supply-chain compromise** of a dependency, a CI action, or the toolchain. | Keep the core dependency-light ([ADR-0014](adr/0014-multi-module-repository.md)). Pin actions by commit. Run zizmor, govulncheck, and CodeQL. Dependabot updates wait 7 days. Protect `main`. | Same. |
 
 ### Access-policy extensions
@@ -106,4 +107,4 @@ These threats apply to the bundled extensions in
 ## Maintenance
 
 Update this document when an ADR adds or changes a protection, when the rewrite
-closes a gap in the _Prototype_ column, or when a report shows a new threat.
+closes a gap in the _Current code_ column, or when a report shows a new threat.
