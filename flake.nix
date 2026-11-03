@@ -32,6 +32,7 @@
               actionlint
               go_1_26
               golangci-lint
+              goperf
               govulncheck
               just
               zizmor

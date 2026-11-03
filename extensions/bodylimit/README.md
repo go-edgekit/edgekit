@@ -1,6 +1,8 @@
 # Streaming request-body limit
 
-`bodylimit.New(maxBytes)` returns ordinary gateway middleware. Register it globally or on selected routes; the example executable uses an 8 MiB limit on `/api/`. Negative limits panic at construction; zero allows only empty bodies.
+**Status:** Prototype. This package and this document use the prototype API at the git tag `prototype-final`. Slice 5 of the [roadmap](../../docs/roadmap.md) moves this protection into the core and rewrites it. With the slice-1 core, a body of unknown length that goes over the limit while the gateway forwards it gets 502, not 413. Slice 3 adds the typed failures that map it to 413 again.
+
+`bodylimit.New(maxBytes)` returns ordinary gateway middleware. Register it globally or on selected routes. Negative limits panic at construction; zero allows only empty bodies.
 
 - A declared `Content-Length` above the limit receives a local generic 413 before downstream handling. This is an HTTP observation, not a gateway hook error.
 - Other bodies use `http.MaxBytesReader`. No body is buffered or read before calling `next`; the response writer is passed through unchanged.

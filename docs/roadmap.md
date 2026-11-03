@@ -15,12 +15,13 @@ The rewrite replaces the prototype in place on `main`, in slices. The prototype 
 Slices:
 
 0. Groundwork: tag, ledger, and the rewrite rule in AGENTS.md. Done.
-1. Proxy core: routing, static upstream selection, forwarding, managed and hop-by-hop headers, transport, and cancellation.
+1. Proxy core: routing, the upstream-selector extension point with static selection, forwarding, managed and hop-by-hop headers, transport, and cancellation. Also the request secure defaults: rejection of opaque-form, absolute-form, and asterisk-form targets and `CONNECT`, the path policy in reject mode (R1), query-semicolon rejection (R2), header-name rejection (R3), and `Alt-Svc` removal (R7). Done.
+   - 1b. Path and query rewriting on routes, and the path policy in normalize mode.
 2. Lifecycle hooks and request state, including the rename of the hook-provider registration.
 3. Typed rejections, the replaceable renderer, and typed failures (R10).
-4. Core-owned hardened server. `cmd/gateway` becomes a testable `Example` and an `examples/` program.
-5. Body limit, admission, and egress as core protections.
-6. Bundled extensions: access log and outbound signing. The `headers` demonstration is removed.
+4. Core-owned hardened server, with a testable `Example` and an `examples/` program. Slice 1 removed the prototype `cmd/gateway` program.
+5. Body limit, admission, and egress as core protections. Configuration to relax each request secure default from slice 1.
+6. Bundled extensions: access log and outbound signing. Slice 1 removed the `headers` and `requesttag` demonstrations.
 
 The rewrite is done when every ledger row is covered or dropped, the ledger and its AGENTS.md rule are deleted, no document calls the code a prototype, and `just check` passes. The Go API stays provisional until v1.
 

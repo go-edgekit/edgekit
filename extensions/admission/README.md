@@ -1,5 +1,7 @@
 # Fail-fast concurrency admission
 
+**Status:** Prototype. This package and this document use the prototype API at the git tag `prototype-final`. Slice 5 of the [roadmap](../../docs/roadmap.md) moves this protection into the core and rewrites it.
+
 `admission.New(maxActive)` returns synchronous gateway middleware that bounds concurrent calls to downstream handlers. It has **no waiting queue**. A positive limit is required; zero and negative values panic at construction.
 
 ```go
@@ -14,7 +16,7 @@ app, err := edgekit.NewWithConfig(edgekit.Config{
 })
 ```
 
-Here `admission` is `github.com/go-edgekit/edgekit/extensions/admission`. The example executable uses this order and a limit of 64. These are example settings, not framework defaults. No new hook or gateway configuration field is needed.
+Here `admission` is `github.com/go-edgekit/edgekit/extensions/admission`. This order and the limit are example settings, not framework defaults. No new hook or gateway configuration field is needed.
 
 ## Behavior
 
