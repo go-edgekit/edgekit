@@ -6,7 +6,7 @@
 
 ## Context
 
-The prototype gateway is only an `http.Handler`; the embedding application creates and configures `http.Server`. Several secure defaults in [ADR-0012](0012-secure-defaults-and-configurable-protections.md) are server settings: header-read timeout, header size, HTTP/2 stream and flow-control limits, and progress-based idle deadlines. The [proxy implementation survey](../investigations/proxy-implementation-survey.md) shows that mature gateways harden this accept-and-parse edge before routing. If the embedder owns the server, these defaults exist only when the embedder copies example code.
+A gateway that is only an `http.Handler` leaves the creation and configuration of `http.Server` to the embedding application. Several secure defaults in [ADR-0012](0012-secure-defaults-and-configurable-protections.md) are server settings: header-read timeout, header size, HTTP/2 stream and flow-control limits, and progress-based idle deadlines. The [proxy implementation survey](../investigations/proxy-implementation-survey.md) shows that mature gateways harden this accept-and-parse edge before routing. If the embedder owns the server, these defaults exist only when the embedder copies example code.
 
 ## Decision
 

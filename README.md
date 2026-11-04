@@ -6,12 +6,11 @@ edgekit is not a CDN, an edge-computing platform, or a cache. It serves, routes,
 
 ## Status
 
-A rewrite replaces the first prototype in slices. See the [roadmap](docs/roadmap.md) and the [rewrite ledger](docs/rewrite-ledger.md). Slice 1, the proxy core, is done: routing, upstream selection, forwarding, header handling, the transport, and the request secure defaults.
+A rewrite replaces the first prototype in slices. See the [roadmap](docs/roadmap.md) and the [rewrite ledger](docs/rewrite-ledger.md). Slice 1, the proxy core, is done: routing, upstream selection, forwarding, header handling, the transport, and the request secure defaults. Slice 2 is done: lifecycle hooks, typed request state, completion with execution facts, and managed headers that extensions declare.
 
 These parts are not in the core yet:
 
-- Lifecycle hooks and request state (slice 2).
-- Typed rejections and the `problem+json` renderer (slice 3). Until then, the gateway sends plain-text error responses that contain only the status text.
+- Typed rejections, the `problem+json` renderer, and typed failures (slice 3). Until then, the gateway sends plain-text error responses that contain only the status text, and hooks can only fail with an error, not reject with a chosen status.
 - The hardened server (slice 4). Until then, configure server-level limits on your own `http.Server`, such as `ReadHeaderTimeout` and `MaxHeaderBytes`.
 - Body limit, admission, and egress as core protections (slice 5). The packages in [`extensions/`](extensions) are prototype code until then.
 

@@ -48,7 +48,7 @@ For example, an ordinary middleware response of 403 does not establish why it wa
 
 Provide an explicit typed rejection understood by one centralized error-response renderer. A controlled rejection is distinct from an unexpected failure, even if both currently use an `error` return. Stop normal processing and render a rejection or failure only where the response can still be changed; do not attempt a replacement response after final headers are committed.
 
-The current `HTTPError` is an experiment, not a frozen public contract. Keep successful local responses in HTTP middleware for now. Introduce a richer hook result only when a concrete hook needs to produce a successful local response, rather than making every hook write a response directly.
+The `HTTPError` of the first implementation (tag `prototype-final`) was an experiment, not a frozen public contract; [ADR-0013](0013-typed-rejections-and-replaceable-renderer.md) replaces it. Keep successful local responses in HTTP middleware. Introduce a richer hook result only when a concrete hook needs to produce a successful local response, rather than making every hook write a response directly.
 
 ### Completion guarantee
 
@@ -72,8 +72,12 @@ Avoid generic retries by default; retry policy must account for idempotency, bod
 
 ## Validation / follow-up
 
-Existing tests cover success, local rejection, routing misses, connection failures, canceled contexts, partial writes, streaming aborts, and connection upgrades. The access-log experiment combines middleware-owned HTTP accounting with gateway metadata and outcomes without changing the core API.
+Tests cover success, local rejection, routing misses, connection failures, canceled contexts, partial writes, streaming aborts, and connection upgrades. Response-observing middleware combines its HTTP accounting with gateway metadata and completion facts without changes to the core API; the access-log experiment of the first implementation (tag `prototype-final`) showed this.
 
-Preserve tests distinguishing upstream HTTP errors from proxy execution errors and explicit rejections from unexpected failures. Add failure-phase facts when implemented, with unknown states where needed. Keep the access-log extension's result classification explicitly separate from the core execution model, and test optional response-writer instrumentation independently.
+Preserve tests distinguishing upstream HTTP errors from proxy execution errors and explicit rejections from unexpected failures. Test the failure-phase facts, including an unknown phase where the source is not known. Keep the access-log extension's result classification explicitly separate from the core execution model, and test optional response-writer instrumentation independently.
 
 **Amended 2026-11-01:** [ADR-0013](0013-typed-rejections-and-replaceable-renderer.md) replaces the `HTTPError` experiment with typed rejections that carry headers, and a replaceable renderer with a `problem+json` default.
+
+**Amended 2026-11-03:** [ADR-0018](0018-completion-observes-gateway-rejections.md) extends the completion guarantee to rejections by the secure defaults, and adds the rejection reason as an execution fact, including `no_route` for a routing miss. [ADR-0017](0017-failure-status-by-source.md) sets the status of a failure by its source.
+
+**Note 2026-11-04:** Completion gives the first failure with its phase (`Failure`, `Phase`), with an unknown phase where the source is not known. This is the structured failure provenance that the decision calls for.

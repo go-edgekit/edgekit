@@ -44,8 +44,14 @@ Keep successful local responses in HTTP middleware for now. The concrete typed-r
 
 ## Validation / follow-up
 
-The current implementation exposes request, outbound-request, upstream-response, and completion hooks, compiled at startup. The access-log experiment exercises middleware state, response hooks, and completion without mandatory core HTTP accounting.
+Tests verify that the hook lists are compiled at startup and run in the order of [ADR-0021](0021-hook-order-by-provider-position.md), and that response hooks and completion work without mandatory core HTTP accounting. `BeforeUpstream` hooks get the actual rewritten outbound request and can use state that route middleware set. A private transport wrapper provides the fallible boundary after `ReverseProxy.Rewrite`, which cannot return errors. Tests verify hook ordering, changes that the upstream observes, request isolation, error redaction, skipping the transport on failure, body closure, cancellation, concurrency, and completion after middleware unwinds or an outbound hook panics.
 
-The [outbound-signing experiment](https://github.com/go-edgekit/edgekit/blob/prototype-final/extensions/outboundsign/README.md) validates `BeforeUpstreamHook` using route-middleware state and the actual rewritten outbound request. A private transport wrapper provides the fallible boundary after `ReverseProxy.Rewrite`, which cannot return errors. Tests verify hook ordering, upstream-observed signatures, request isolation, error redaction, skipping transport on failure, body closure, cancellation, concurrency, and completion after middleware unwinds or an outbound hook panics.
+In the first implementation (tag `prototype-final`), an [outbound-signing experiment](https://github.com/go-edgekit/edgekit/blob/prototype-final/extensions/outboundsign/README.md) and an access-log experiment validated these phases.
 
-No route-matched hook was needed for signing. Dedicated route-matched hooks and structured failure provenance remain follow-up work, not existing capabilities. When a route-matched hook is needed, verify that route middleware establishes state before it runs. Preserve the ordering in ADR-0004, and do not stabilize Go signatures solely because the architectural direction is accepted or one experiment succeeds.
+Signing needs no route-matched hook. Add `RouteMatched` only when a requirement needs it, and then verify that route middleware establishes state before it runs. Preserve the ordering in ADR-0004, and do not stabilize Go signatures solely because the architectural direction is accepted or one experiment succeeds.
+
+**Amended 2026-11-03:** [ADR-0019](0019-hook-outputs-and-destination-ownership.md) gives `BeforeUpstream` hooks a view of the rewritten outbound request whose only mutable part is the header map, so upstream selection owns the destination structurally. It also defines the header rules that the core applies after the hooks.
+
+**Note 2026-11-04:** Upstream selection is an extension point (`UpstreamSelector`, [ADR-0008](0008-separate-routing-from-upstream-selection.md)). [ADR-0013](0013-typed-rejections-and-replaceable-renderer.md) defines the typed rejection and the replaceable renderer.
+
+**Superseded in part 2026-11-04:** [ADR-0021](0021-hook-order-by-provider-position.md) replaces registration order in each phase. The first hook provider is the outermost one, as for middleware: the request phases run from the first provider to the last, and `UpstreamResponse` and completion hooks run from the last provider to the first.

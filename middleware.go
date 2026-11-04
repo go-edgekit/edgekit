@@ -17,7 +17,10 @@ import (
 // A middleware must not change the request that it gets, as [http.Handler]
 // also requires. The request can be the request that the caller gave to
 // [Gateway.ServeHTTP]. To change the request, make a copy with
-// [http.Request.Clone], change the copy, and give the copy to next.
+// [http.Request.Clone], change the copy, and give the copy to next. The
+// headers and trailer names that middleware sets must obey the outbound header
+// check (see [Gateway]). Otherwise the gateway sends 500 Internal Server
+// Error and does not call the upstream.
 //
 // The gateway calls each middleware function one time, in [New], and uses the
 // returned handler for all requests. The returned handler must be safe for

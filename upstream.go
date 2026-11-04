@@ -3,6 +3,7 @@ package edgekit
 import (
 	"errors"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 )
@@ -20,10 +21,18 @@ import (
 //   - The returned URL must be an absolute http or https URL with a host. It
 //     must not contain user information, a query, or a fragment. A path is a
 //     base path: the gateway adds the inbound path to it.
+//   - The host must be in the form that the transport sends without changes:
+//     ASCII letters, digits, ".", "-", and "_", or an IPv6 literal in
+//     brackets, with an optional port. Give an internationalized name in its
+//     ASCII (Punycode) form. IPv6 zones, such as "[fe80::1%eth0]", are not
+//     permitted. So [OutboundRequest.Host] is the Host value that the
+//     upstream receives, and a hook can sign it.
 //   - The gateway copies the returned URL and does not change it.
 //   - If SelectUpstream returns an error, or a URL that does not obey the
-//     contract, the gateway sends 502 Bad Gateway. It does not send the error
-//     text to the client.
+//     contract, the gateway sends 500 Internal Server Error, because the
+//     failure is not in the upstream. It does not send the error text to the
+//     client. Completion gets the error as a [Failure] in
+//     [PhaseUpstreamSelection].
 type UpstreamSelector interface {
 	SelectUpstream(r *http.Request) (*url.URL, error)
 }
@@ -79,6 +88,8 @@ func checkUpstreamURL(u *url.URL) error {
 		return errors.New("is opaque")
 	case u.Host == "":
 		return errors.New("host is empty")
+	case !hostSentUnchanged(u.Host):
+		return errors.New("host is not in the ASCII form that the transport sends")
 	case u.User != nil:
 		return errors.New("contains user information")
 	case u.RawQuery != "" || u.ForceQuery:
@@ -90,4 +101,41 @@ func checkUpstreamURL(u *url.URL) error {
 	}
 
 	return nil
+}
+
+// hostSentUnchanged reports whether the transport sends host without changes.
+// The transport converts a non-ASCII name to Punycode, removes an IPv6 zone
+// (RFC 6874), and sends no Host value, or fails, for other invalid characters.
+// The port separator is found as by [url.URL.Port], so a malformed host fails
+// here and not later as a dial failure.
+func hostSentUnchanged(host string) bool {
+	name, port := host, ""
+	if i := strings.LastIndexByte(host, ':'); i > strings.LastIndexByte(host, ']') {
+		name, port = host[:i], host[i+1:]
+	}
+
+	if port != "" && !isDecimal(port) {
+		return false
+	}
+
+	if literal, ok := strings.CutPrefix(name, "["); ok {
+		literal, ok = strings.CutSuffix(literal, "]")
+		addr, err := netip.ParseAddr(literal)
+
+		return ok && err == nil && addr.Is6() && addr.Zone() == ""
+	}
+
+	if name == "" {
+		return false
+	}
+
+	for i := range len(name) {
+		switch c := name[i]; {
+		case isHeaderNameChar(c), c == '.', c == '_':
+		default:
+			return false
+		}
+	}
+
+	return true
 }

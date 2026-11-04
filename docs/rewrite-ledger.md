@@ -49,24 +49,40 @@ New tests without a prototype row: `inbound_test.go:TestSecureDefaultsRejectBefo
 
 | Prototype test | Behavior | Status | New tests | ADR |
 | --- | --- | --- | --- | --- |
-| `lifecycle_test.go:TestLifecycleContextAndOrder` | Hooks and middleware share one gateway context; phases run in a fixed order | pending | | 0003, 0005 |
-| `lifecycle_test.go:TestCompletionOnEarlyExits` | Completion runs when middleware or a hook ends handling early | pending | | 0009 |
-| `lifecycle_test.go:TestHookErrorsStopPhaseAndHideInternalDetails` | A hook error stops its phase; the response contains no internal details | pending | | 0009, 0013 |
-| `lifecycle_test.go:TestTransportErrorReachesCompletion` | A transport error is an execution fact visible at completion | pending | | 0009 |
-| `lifecycle_test.go:TestCompletionDuringPanicUnwinding` | Completion runs while a panic unwinds, and the panic continues | pending | | 0009 |
-| `lifecycle_test.go:TestStreamingFailureAbortsAndCompletes` | A failure during response streaming aborts the response and completion runs | pending | | 0009 |
-| `lifecycle_test.go:TestRequestTagExtension` | Middleware and hooks of one extension share typed request state | pending | | 0005 |
-| `lifecycle_test.go:TestTypedStateIsolationAndNilValues` | Typed state keys are isolated from each other; nil values are stored and read correctly | pending | | 0005 |
-| `lifecycle_test.go:TestConcurrentRequestStateIsolation` | Concurrent requests do not see each other's state | pending | | 0005 |
-| `lifecycle_test.go:TestCancellationReachesHooks` | Client cancellation is visible to hooks | pending | | 0005 |
-| `lifecycle_test.go:TestCompletionOnOutboundPanic` | Completion runs when an outbound hook panics | pending | | 0009 |
-| `lifecycle_test.go:TestInvalidExtensions` | Construction rejects invalid hook providers | pending | | 0007 |
-| `outbound_test.go:TestOutboundTransportClonesMetadataAndPassesTheHookRequest` | Outbound hooks get a copy of request metadata; the transport gets the request that the hooks made; the body streams | pending | | 0003 |
-| `outbound_test.go:TestOutboundTransportFailureClosesBodyWithoutDelegating` | An outbound hook failure stops later hooks, closes the body, and does not call the transport | pending | | 0003 |
-| `proxy_safety_test.go:TestConfiguredTransportWithAndWithoutOutboundHooks` | A configured transport is used with and without outbound hooks | pending | | 0003 |
-| `proxy_safety_test.go:TestClientCancellationReachesUpstreamAndCompletion` | Client cancellation reaches the upstream and is visible at completion | pending | | 0009 |
-| `proxy_safety_test.go:TestResponseHeaderTimeoutCancelsUpstream` _(split)_ | A response-header timeout is a timeout error at completion, and completion runs after middleware unwinds | pending | | 0009 |
-| `cmd/gateway/resource_limits_test.go:TestUpstreamHeaderLimitBeforeResponseHooks` | Oversized upstream response headers fail before response hooks run, on HTTP/1.1 and HTTP/2 | pending | | 0012 |
+| `lifecycle_test.go:TestLifecycleContextAndOrder` | Hooks and middleware share one gateway context; phases run in a fixed order | covered | `lifecycle_test.go:TestLifecycleContextAndOrder` | 0003, 0004, 0005, 0021 |
+| `lifecycle_test.go:TestCompletionOnEarlyExits` | Completion runs when middleware or a hook ends handling early | covered | `lifecycle_test.go:TestCompletionOnEarlyExits`, `lifecycle_test.go:TestSecureDefaultRejectionReachesCompletion` | 0009, 0018, 0020 |
+| `lifecycle_test.go:TestHookErrorsStopPhaseAndHideInternalDetails` | A hook error stops its phase; the response contains no internal details | covered | `lifecycle_test.go:TestHookErrorsStopPhaseAndHideInternalDetails`, `outbound_test.go:TestBeforeUpstreamInvalidHeaderFails` | 0009, 0017 |
+| `lifecycle_test.go:TestTransportErrorReachesCompletion` | A transport error is an execution fact visible at completion | covered | `lifecycle_test.go:TestTransportErrorReachesCompletion` | 0009 |
+| `lifecycle_test.go:TestCompletionDuringPanicUnwinding` | Completion runs while a panic unwinds, and the panic continues | covered | `lifecycle_test.go:TestCompletionDuringPanicUnwinding` | 0009 |
+| `lifecycle_test.go:TestStreamingFailureAbortsAndCompletes` | A failure during response streaming aborts the response and completion runs | covered | `lifecycle_test.go:TestStreamingFailureAbortsAndCompletes` | 0009 |
+| `lifecycle_test.go:TestRequestTagExtension` | Middleware and hooks of one extension share typed request state | covered | `lifecycle_test.go:TestExtensionSharesStateBetweenMiddlewareAndHooks` | 0005 |
+| `lifecycle_test.go:TestTypedStateIsolationAndNilValues` | Typed state keys are isolated from each other; nil values are stored and read correctly | covered | `lifecycle_test.go:TestTypedStateIsolationAndNilValues`, `lifecycle_test.go:TestStateIsDroppedAfterCompletion` | 0005 |
+| `lifecycle_test.go:TestConcurrentRequestStateIsolation` | Concurrent requests do not see each other's state | covered | `lifecycle_test.go:TestConcurrentRequestStateIsolation` | 0005 |
+| `lifecycle_test.go:TestCancellationReachesHooks` | Client cancellation is visible to hooks | covered | `lifecycle_test.go:TestCancellationReachesHooks` | 0005 |
+| `lifecycle_test.go:TestCompletionOnOutboundPanic` | Completion runs when an outbound hook panics | covered | `lifecycle_test.go:TestCompletionOnOutboundPanic` | 0009 |
+| `lifecycle_test.go:TestInvalidExtensions` | Construction rejects invalid hook providers | covered | `gateway_test.go:TestInvalidHookProviders`, `gateway_test.go:TestHookProvidersAccepted` | 0007 |
+| `outbound_test.go:TestOutboundTransportClonesMetadataAndPassesTheHookRequest` | Outbound hooks get a copy of request metadata; the transport gets the request that the hooks made; the body streams | covered | `outbound_test.go:TestBeforeUpstreamHookChangesReachTransport`, `outbound_test.go:TestBeforeUpstreamHeaderRules` | 0003, 0019 |
+| `outbound_test.go:TestOutboundTransportFailureClosesBodyWithoutDelegating` | An outbound hook failure stops later hooks, closes the body, and does not call the transport | covered | `outbound_internal_test.go:TestOutboundFailureClosesBodyWithoutDelegating` (white-box, see below), `lifecycle_test.go:TestHookErrorsStopPhaseAndHideInternalDetails` | 0003 |
+| `proxy_safety_test.go:TestConfiguredTransportWithAndWithoutOutboundHooks` | A configured transport is used with and without outbound hooks | covered | `outbound_test.go:TestConfiguredTransportWithAndWithoutOutboundHooks` | 0003, 0017 |
+| `proxy_safety_test.go:TestClientCancellationReachesUpstreamAndCompletion` | Client cancellation reaches the upstream and is visible at completion | covered | `lifecycle_test.go:TestClientCancellationReachesUpstreamAndCompletion` | 0009 |
+| `proxy_safety_test.go:TestResponseHeaderTimeoutCancelsUpstream` _(split)_ | A response-header timeout is a timeout error at completion, and completion runs after middleware unwinds | covered | `lifecycle_test.go:TestResponseHeaderTimeoutReachesCompletion` | 0009 |
+| `cmd/gateway/resource_limits_test.go:TestUpstreamHeaderLimitBeforeResponseHooks` | Oversized upstream response headers fail before response hooks run, on HTTP/1.1 and HTTP/2 | covered | `transport_test.go:TestUpstreamHeaderLimitBeforeResponseHooks` | 0012, 0017 |
+
+Changes from the prototype behavior:
+
+- Registration and outcome. Old: `Config.Extensions []any`, hook methods `OnRequest`, `OnBeforeUpstream`, `OnUpstreamResponse`, and `OnComplete`, and `Outcome{Duration, Err, Aborted}`. New: `Config.Hooks []any` with `RequestReceivedHook`, `BeforeUpstreamHook`, `UpstreamResponseHook`, `RequestCompletedHook`, and `HeaderOwner`. Completion gets `Completion`: start, duration, route, selected upstream, the first failure with its phase, the rejection reason, and the abort fact. Construction errors wrap `ErrInvalidConfiguration` and give the location `hooks N` only.
+- `TestCompletionOnEarlyExits`. Old: `/api` redirected to `/api/` (`http.ServeMux`), and a hook rejection with `HTTPError` gave 429. New: `/api` does not match `/api/`, gets 404, and completion runs with the reason `no_route` (ADR-0020). A hook error gives 500; the typed rejection is a slice-3 row. Completion also runs for secure-default rejections, with a reason code and no request content (ADR-0018).
+- `TestHookErrorsStopPhaseAndHideInternalDetails`. Old: 500 for a request-hook error, 502 for outbound and response hooks; `HTTPError` set the status and message. New: 500 for all three phases, because the failure is in the extension, not in the upstream (ADR-0017). The `HTTPError` cases are a slice-3 row.
+- `TestOutboundTransportClonesMetadataAndPassesTheHookRequest`. Old: the hook got a clone of the `*http.Request` and could change its URL and body. New: the hook gets an `OutboundRequest`, whose only mutable part is the header map, so it cannot change the destination (ADR-0019). The hook changes the header map of the outbound copy that `ReverseProxy` makes, so the inbound request does not change; the core makes no second clone. After the hooks, the core restores the hop-by-hop fields, removes generated framing fields, and fails with 500 for an invalid header name or value.
+- `TestOutboundTransportFailureClosesBodyWithoutDelegating` is a white-box test. Through the gateway, `ReverseProxy` gives the transport a body wrapper whose `Close` has no visible effect, so only a direct call of the private transport wrapper shows that it closes the body.
+- `TestTypedStateIsolationAndNilValues`. Old: the test made a `RequestContext` itself. New: the zero value is not useful, so the test gets the gateway context through the gateway. After completion, the core drops the state.
+- `TestConcurrentRequestStateIsolation`. Old: an `HTTPError` made the local response. New: a routing miss makes it.
+- `TestRequestTagExtension`. Slice 1 removed the `requesttag` extension. The new test uses an extension that is defined in the test.
+- Selector failures (slice-1 test `gateway_test.go:TestCustomUpstreamSelector`). Old: 502. New: 500 (ADR-0017).
+- Outbound header check (slice-1 behavior, `hooks_test.go:TestOutboundHeaderCheckDoesNotDependOnHooks`). Old: a header that middleware set went to the transport without a check, so the transport forwarded a name such as `X_User` and failed the round trip (502) for a control character in a value. New: the core checks the outbound headers and trailer names for each request, also without hooks, and a failure is 500 in `PhaseBeforeUpstream` (ADR-0019). Traffic with such headers from middleware now fails.
+- Upstream hosts (slice-1 tests `gateway_test.go:TestStaticUpstreamAcceptsValidURL` and `gateway_test.go:TestStaticUpstreamRejectsInvalidURL`, extended). Old: any host. New: only a host that the transport sends without changes, so `OutboundRequest.Host` is the wire value; an internationalized name needs its Punycode form, and IPv6 zones are rejected (ADR-0019).
+
+New tests without a prototype row: `lifecycle_test.go:TestSecureDefaultRejectionReachesCompletion`, `lifecycle_test.go:TestStateIsDroppedAfterCompletion`, `lifecycle_test.go:TestMissingGatewayContextFailsClosed`, `outbound_test.go:TestBeforeUpstreamHeaderRules`, `outbound_test.go:TestBeforeUpstreamInvalidHeaderFails`, `response_test.go:TestResponseHeaderRulesAfterHooks`, `response_test.go:TestResponseContentLengthAfterHooks`, `response_test.go:TestUpgradeResponseHeaderRulesAfterHooks`, `response_test.go:TestUpgradeProtocolIsRestoredAfterHooks`, `response_test.go:TestUpgradeMismatchFromUpstream`, `response_test.go:TestResponseHooksSkipInformationalResponses`, `response_test.go:TestConnectionTokensDoNotDependOnMapOrder`, `response_test.go:TestUpgradeConnectionTokensDoNotDependOnMapOrder`, `response_test.go:TestResponseHooksGetTheGatewayContext`, `response_test.go:TestResponseHookCannotCrossTheUpgradeBoundary`, `outbound_test.go:TestOutboundHostIsTheValueThatTheUpstreamGets`, `outbound_test.go:TestSelectedHostThatTheTransportChangesIsRejected`, `inbound_test.go:TestDeclaredManagedHeadersAreRemoved`, `gateway_test.go:TestHookProvidersAccepted`, `example_test.go:ExampleBeforeUpstreamHook`, `example_test.go:ExampleSetState`, `hooks_test.go:TestHookAdaptersExposeOnlyTheirPhase`, `hooks_test.go:TestOutboundHeaderCheckDoesNotDependOnHooks`, `outbound_internal_test.go:TestOutboundCheckNamesTheFailedCheck`, `fields_internal_test.go:TestRemovedFieldSetsFollowReservedHeaders`, and `benchmark_test.go:BenchmarkServeHTTPHooks`.
 
 ## Slice 3: rejections, renderer, and typed failures
 
@@ -74,6 +90,8 @@ New tests without a prototype row: `inbound_test.go:TestSecureDefaultsRejectBefo
 | --- | --- | --- | --- | --- |
 | `diagnostics_test.go:TestProxyStreamDiagnosticOmitsDetailsAndPreservesAbort` | A stream failure diagnostic has no details and does not change the abort or completion | pending | | 0009 |
 | `diagnostics_test.go:TestProxyErrorRemainsAvailableWithoutAutomaticLogging` | The original proxy error stays available to the caller and is not logged automatically | pending | | 0009, 0013 |
+| `lifecycle_test.go:TestHookErrorsStopPhaseAndHideInternalDetails` _(split)_ | A typed rejection from a hook sets the status and the public message; a rejection with a status that is not 4xx or 5xx gives a generic 500 | pending | | 0013 |
+| `lifecycle_test.go:TestCompletionOnEarlyExits` _(split)_ | A typed rejection from a request hook gives its status (429) and is visible at completion | pending | | 0013 |
 
 ## Slice 4: hardened server
 

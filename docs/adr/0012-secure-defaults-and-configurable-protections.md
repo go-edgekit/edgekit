@@ -7,7 +7,7 @@
 
 ## Context
 
-ADR-0010 framed hardening as verification of a scaffold, and the prototype placed body limits, admission, and egress restrictions in optional packages. The [proxy implementation survey](../investigations/proxy-implementation-survey.md) found correctness risks (path confusion, query semicolons, header aliasing) and left open whether such protections are framework defaults or opt-in middleware.
+ADR-0010 framed hardening as verification of a scaffold, and the first implementation (tag `prototype-final`) placed body limits, admission, and egress restrictions in optional packages. The [proxy implementation survey](../investigations/proxy-implementation-survey.md) found correctness risks (path confusion, query semicolons, header aliasing) and left open whether such protections are framework defaults or opt-in middleware.
 
 ## Decision
 
@@ -48,6 +48,8 @@ The project still does not claim production readiness until requirements and tes
 
 ## Validation / follow-up
 
-Typed dial and request-written failures (R10) are built with the core rewrite, so that R5 does not depend on error strings. R6 and R11 remain on the [roadmap](../roadmap.md) after the bundled policy extensions.
+R5 uses typed dial and request-written failures (R10), never error strings. R6 and R11 are planned in the [roadmap](../roadmap.md).
 
 The classification was extended on 2026-11-01, after reviewing the [proxy implementation survey](../investigations/proxy-implementation-survey.md) against this ADR: managed headers, opaque/absolute-form/`CONNECT` rejection, and transport compression were added, and R9 moved from configurable protection to secure default. Reclassify a protection only with evidence about workloads.
+
+**Refined 2026-11-03:** [ADR-0017](0017-failure-status-by-source.md) sets the status of the failures that R5 does not cover, by the source of the failure.

@@ -39,23 +39,25 @@ var reservedHeaders = map[string]struct{}{
 	"Upgrade":             {},
 }
 
-// checkRequest returns the status for a request that the secure defaults
-// reject, or 0 if the request can continue.
-func checkRequest(r *http.Request) int {
+// checkRequest returns the status and the reason for a request that the
+// secure defaults reject, or 0 if the request can continue.
+func checkRequest(r *http.Request) (int, RejectionReason) {
 	// The cases run in order and stop at the first match, so the path check
 	// only gets an origin-form URL.
 	switch {
 	case r.Method == http.MethodConnect:
-		return http.StatusNotImplemented
-	case !isOriginForm(r),
-		!pathAllowed(r.URL.EscapedPath()),
-		!queryAllowed(r.URL.RawQuery),
-		!headerNamesAllowed(r.Header),
-		!headerNamesAllowed(r.Trailer):
-		return http.StatusBadRequest
+		return http.StatusNotImplemented, ReasonInvalidMethod
+	case !isOriginForm(r):
+		return http.StatusBadRequest, ReasonInvalidRequestTarget
+	case !pathAllowed(r.URL.EscapedPath()):
+		return http.StatusBadRequest, ReasonInvalidPath
+	case !queryAllowed(r.URL.RawQuery):
+		return http.StatusBadRequest, ReasonInvalidQuery
+	case !headerNamesAllowed(r.Header), !headerNamesAllowed(r.Trailer):
+		return http.StatusBadRequest, ReasonInvalidHeaderName
 	}
 
-	return 0
+	return 0, ""
 }
 
 // isOriginForm examines URL, because RequestURI is empty for a request that did
@@ -177,11 +179,12 @@ func (g *Gateway) removedHeader(canonical string) bool {
 	return ok
 }
 
-// stripHeaders never changes r, and returns a copy with new header and trailer
-// maps when it removes headers.
-func (g *Gateway) stripHeaders(r *http.Request) *http.Request {
+// stripHeaders needs a shallow copy of the caller's request. It never changes
+// the maps of the copy, which the caller's request shares, and gives the copy
+// new header and trailer maps when it removes headers.
+func (g *Gateway) stripHeaders(r *http.Request) {
 	if !g.needsStrip(r.Header) && !g.trailersNeedStrip(r.Trailer) {
-		return r
+		return
 	}
 
 	header := r.Header.Clone()
@@ -200,12 +203,8 @@ func (g *Gateway) stripHeaders(r *http.Request) *http.Request {
 		}
 	}
 
-	// WithContext makes a shallow copy, so the copy can get its own maps.
-	stripped := r.WithContext(r.Context())
-	stripped.Header = header
-	stripped.Trailer = g.stripTrailers(r.Trailer)
-
-	return stripped
+	r.Header = header
+	r.Trailer = g.stripTrailers(r.Trailer)
 }
 
 // stripTrailers exists because ReverseProxy forwards the declared trailer
@@ -256,11 +255,11 @@ func (g *Gateway) needsStrip(header http.Header) bool {
 // connectionValues returns values unchanged when it removes no token.
 func (g *Gateway) connectionValues(values []string) ([]string, bool) {
 	changed := false
-	for _, value := range values {
-		for token := range strings.SplitSeq(value, ",") {
-			if g.removedHeader(textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(token))) {
-				changed = true
-			}
+	for token := range listTokens(values) {
+		if g.removedHeader(textproto.CanonicalMIMEHeaderKey(token)) {
+			changed = true
+
+			break
 		}
 	}
 

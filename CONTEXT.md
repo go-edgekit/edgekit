@@ -33,6 +33,14 @@ An extension point that wraps HTTP handling and may end it early.
 An extension point that runs at a named phase of proxy execution with access to proxy-specific state.
 _Avoid_: Plugin, event handler
 
+**Processing hook**:
+A lifecycle hook that takes part in handling before completion: when the request is received, before the upstream, or at the upstream response. A completion hook only observes.
+_Avoid_: Filter
+
+**Hook provider**:
+A value that an extension registers with the gateway to supply its lifecycle hooks or to declare its managed headers. It is a part of an extension, not the extension itself.
+_Avoid_: Extension (for the registered value), plugin
+
 **Transport**:
 An extension point that carries the outbound request to the selected upstream.
 
@@ -81,6 +89,10 @@ A header that states who the client is or where the request came from, such as `
 **Rejection**:
 A deliberate refusal to continue handling, carrying a status, response headers, and a public reason. It is distinct from an unexpected failure.
 _Avoid_: Error (for deliberate refusals)
+
+**Rejection reason**:
+A public code that names the check that refused a request, never the value that failed it. It contains no request content.
+_Avoid_: Error message, rejection detail
 
 **Gateway-managed handling**:
 The processing of an inbound request governed by the gateway, including its registered extensions. It excludes work performed independently by callers outside that boundary.

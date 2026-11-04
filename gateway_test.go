@@ -74,6 +74,15 @@ func receive[T any](t *testing.T, ch <-chan T) T {
 	}
 }
 
+// pointerSelector is an UpstreamSelector with a pointer receiver, so a nil
+// *pointerSelector is a typed nil selector.
+type pointerSelector struct{}
+
+// SelectUpstream always fails.
+func (*pointerSelector) SelectUpstream(*http.Request) (*url.URL, error) {
+	return nil, errors.New("not used")
+}
+
 // upstreamRequest is what a test upstream received.
 type upstreamRequest struct {
 	method     string
@@ -431,23 +440,23 @@ func TestCustomUpstreamSelector(t *testing.T) {
 		},
 		{
 			pool:   "credentials",
-			status: http.StatusBadGateway,
-			body:   "Bad Gateway\n",
+			status: http.StatusInternalServerError,
+			body:   "Internal Server Error\n",
 		},
 		{
 			pool:   "query",
-			status: http.StatusBadGateway,
-			body:   "Bad Gateway\n",
+			status: http.StatusInternalServerError,
+			body:   "Internal Server Error\n",
 		},
 		{
 			pool:   "nil",
-			status: http.StatusBadGateway,
-			body:   "Bad Gateway\n",
+			status: http.StatusInternalServerError,
+			body:   "Internal Server Error\n",
 		},
 		{
 			pool:   "error",
-			status: http.StatusBadGateway,
-			body:   "Bad Gateway\n",
+			status: http.StatusInternalServerError,
+			body:   "Internal Server Error\n",
 		},
 	} {
 		t.Run(tc.pool, func(t *testing.T) {
@@ -481,6 +490,18 @@ func TestStaticUpstreamAcceptsValidURL(t *testing.T) {
 		{
 			name:     "base path",
 			upstream: &url.URL{Scheme: "http", Host: "upstream.test", Path: "/base"},
+		},
+		{
+			name:     "Punycode name",
+			upstream: &url.URL{Scheme: "http", Host: "xn--bcher-kva.example"},
+		},
+		{
+			name:     "underscore and upper case",
+			upstream: &url.URL{Scheme: "http", Host: "Upstream_1.internal:8080"},
+		},
+		{
+			name:     "IPv6 literal",
+			upstream: &url.URL{Scheme: "http", Host: "[2001:db8::1]:8080"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -537,6 +558,26 @@ func TestStaticUpstreamRejectsInvalidURL(t *testing.T) {
 		{
 			name:     "relative path",
 			upstream: &url.URL{Scheme: "http", Host: "upstream.test", Path: "secret"},
+		},
+		{
+			name:     "internationalized name",
+			upstream: &url.URL{Scheme: "http", Host: "secret-bücher.example"},
+		},
+		{
+			name:     "IPv6 zone",
+			upstream: &url.URL{Scheme: "http", Host: "[fe80::1%secret]:8080"},
+		},
+		{
+			name:     "space in host",
+			upstream: &url.URL{Scheme: "http", Host: "upstream.test secret"},
+		},
+		{
+			name:     "slash in host",
+			upstream: &url.URL{Scheme: "http", Host: "upstream.test/secret"},
+		},
+		{
+			name:     "control character in host",
+			upstream: &url.URL{Scheme: "http", Host: "upstream.test\rsecret"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -645,6 +686,10 @@ func TestInvalidConfiguration(t *testing.T) {
 			cfg:  withRoutes(edgekit.Route{Prefix: "/api/", Upstream: edgekit.UpstreamSelectorFunc(nil)}),
 		},
 		{
+			name: "nil upstream pointer",
+			cfg:  withRoutes(edgekit.Route{Prefix: "/api/", Upstream: (*pointerSelector)(nil)}),
+		},
+		{
 			name:     "nil route middleware",
 			cfg:      withRouteMiddleware(passThrough, nil),
 			location: "route 0: middleware 1:",
@@ -671,6 +716,10 @@ func TestInvalidConfiguration(t *testing.T) {
 		{
 			name: "nil transport pointer",
 			cfg:  withTransport((*http.Transport)(nil)),
+		},
+		{
+			name: "nil transport function",
+			cfg:  withTransport(roundTripperFunc(nil)),
 		},
 		{
 			name: "empty managed header",
@@ -875,5 +924,84 @@ func TestGatewayConstructionDoesNotReconfigureProcessLogging(t *testing.T) {
 
 	if output.Len() != 0 {
 		t.Errorf("New wrote log output %q, want none", output.String())
+	}
+}
+
+func TestInvalidHookProviders(t *testing.T) {
+	var typedNil *testHooks
+
+	for _, tc := range []struct {
+		name     string
+		provider any
+		location string
+	}{
+		{
+			name:     "nil",
+			provider: nil,
+			location: "hooks 0: is nil",
+		},
+		{
+			name:     "typed nil",
+			provider: typedNil,
+			location: "hooks 0: is nil",
+		},
+		{
+			name:     "no hook interface",
+			provider: struct{}{},
+			location: "hooks 0: implements no hook interface",
+		},
+		{
+			name:     "managed header alias",
+			provider: headerOwner{"X_Customer"},
+			location: "hooks 0: managed header 0:",
+		},
+		{
+			name:     "managed hop-by-hop header",
+			provider: headerOwner{"Connection"},
+			location: "hooks 0: managed header 0:",
+		},
+		{
+			name:     "duplicate in one declaration",
+			provider: headerOwner{"X-Customer", "x-customer"},
+			location: "hooks 0: managed header 1: is a duplicate",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := edgekit.New(edgekit.Config{
+				Routes: []edgekit.Route{{
+					Prefix:   "/api/",
+					Upstream: static(t, "http://upstream.test"),
+				}},
+				Hooks: []any{tc.provider},
+			})
+
+			if !errors.Is(err, edgekit.ErrInvalidConfiguration) || !strings.Contains(err.Error(), tc.location) {
+				t.Errorf("New error = %v, want %v with %q", err, edgekit.ErrInvalidConfiguration, tc.location)
+			}
+
+			if err != nil && strings.Contains(strings.ToLower(err.Error()), "customer") {
+				t.Errorf("New error %q contains the header name", err)
+			}
+		})
+	}
+}
+
+func TestHookProvidersAccepted(t *testing.T) {
+	// A provider can only declare headers, and declarations can overlap with
+	// each other and with Config.ManagedHeaders.
+	_, err := edgekit.New(edgekit.Config{
+		Routes: []edgekit.Route{{
+			Prefix:   "/api/",
+			Upstream: static(t, "http://upstream.test"),
+		}},
+		ManagedHeaders: []string{"X-Customer"},
+		Hooks: []any{
+			headerOwner{"X-Customer"},
+			headerOwner{"x-customer", "X-Key-Id"},
+			&testHooks{},
+		},
+	})
+	if err != nil {
+		t.Errorf("New: %v", err)
 	}
 }

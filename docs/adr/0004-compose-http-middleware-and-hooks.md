@@ -61,6 +61,10 @@ HTTP response accounting belongs in optional response-observing middleware, not 
 
 ## Validation / follow-up
 
-Existing tests cover normal middleware ordering, route misses and redirects, global and route rejection, panic unwinding, and completion. The access-log tests exercise optional response capture, streaming, flushing, and connection upgrades.
+Tests cover normal middleware ordering, route misses, global and route rejection, panic unwinding, and completion. Tests of response-observing middleware cover optional response capture, streaming, flushing, and connection upgrades.
 
-When route-matched hooks are added, test that route middleware establishes state before those hooks run. Keep architectural ordering distinct from which extension points are currently implemented, and verify early exits skip only the inner stages.
+When route-matched hooks are added, test that route middleware establishes state before those hooks run. Keep the architectural ordering distinct from the set of extension points that exist, and verify that early exits skip only the inner stages.
+
+**Amended 2026-11-03:** [ADR-0018](0018-completion-observes-gateway-rejections.md) places the secure-default request checks inside the completion observer and before the removal of managed headers. Completion observes their rejections without running middleware or processing hooks.
+
+**Superseded in part 2026-11-04:** [ADR-0021](0021-hook-order-by-provider-position.md) replaces registration order in each phase. The first hook provider is the outermost one, as for middleware: the request phases run from the first provider to the last, and `UpstreamResponse` and completion hooks run from the last provider to the first.

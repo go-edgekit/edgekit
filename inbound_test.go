@@ -547,6 +547,9 @@ func TestForwardingTrustAndHopByHopHeaders(t *testing.T) {
 	}
 }
 
+// TestConnectionCannotRemoveManagedHeader covers the attack of Traefik
+// CVE-2024-45410: a client names a header in Connection, so the proxy removes
+// the value that middleware set.
 func TestConnectionCannotRemoveManagedHeader(t *testing.T) {
 	received := make(chan http.Header, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -839,5 +842,96 @@ func TestMiddlewareQueryIsForwardedUnchanged(t *testing.T) {
 
 	if got := receive(t, received); got != query {
 		t.Errorf("upstream query = %q, want %q", got, query)
+	}
+}
+
+// headerOwner is a hook provider that only declares managed headers.
+type headerOwner []string
+
+// ManagedHeaders returns the names.
+func (o headerOwner) ManagedHeaders() []string {
+	return o
+}
+
+func TestDeclaredManagedHeadersAreRemoved(t *testing.T) {
+	type received struct {
+		header  []string
+		trailer http.Header
+	}
+	got := make(chan received, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		got <- received{
+			header:  r.Header.Values("X-Customer"),
+			trailer: r.Trailer.Clone(),
+		}
+	}))
+	defer upstream.Close()
+
+	server := httptest.NewServer(newGateway(t, edgekit.Config{
+		Routes: []edgekit.Route{{
+			Prefix:   "/api/",
+			Upstream: static(t, upstream.URL),
+		}},
+		Hooks: []any{headerOwner{"x-customer"}},
+		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r = r.Clone(r.Context())
+				r.Header.Set("X-Customer", "verified")
+				next.ServeHTTP(w, r)
+			})
+		}},
+	}))
+	defer server.Close()
+
+	var dialer net.Dialer
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	conn, err := dialer.DialContext(ctx, "tcp", server.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	deadline, _ := ctx.Deadline()
+	_ = conn.SetDeadline(deadline)
+
+	// The client sends the declared header, names it in Connection, so the
+	// proxy would remove the value of middleware, and sends it as a trailer.
+	request := "POST /api/x HTTP/1.1\r\n" +
+		"Host: gateway.test\r\n" +
+		"X-Customer: spoofed\r\n" +
+		"Connection: X-Customer\r\n" +
+		"Transfer-Encoding: chunked\r\n" +
+		"Trailer: X-Customer, X-Checksum\r\n" +
+		"\r\n" +
+		"3\r\n" +
+		"abc\r\n" +
+		"0\r\n" +
+		"X-Customer: spoofed\r\n" +
+		"X-Checksum: abc\r\n" +
+		"\r\n"
+	if _, err = io.WriteString(conn, request); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+
+	r := receive(t, got)
+	if !slices.Equal(r.header, []string{"verified"}) {
+		t.Errorf("upstream got X-Customer %q, want only the value of middleware", r.header)
+	}
+
+	if _, ok := r.trailer["X-Customer"]; ok {
+		t.Errorf("upstream got trailer X-Customer %q, want none", r.trailer.Values("X-Customer"))
+	}
+
+	if _, ok := r.trailer["X-Checksum"]; !ok {
+		t.Errorf("upstream trailers = %v, want X-Checksum", r.trailer)
 	}
 }

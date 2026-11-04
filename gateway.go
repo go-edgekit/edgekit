@@ -4,13 +4,11 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httputil"
-	"net/textproto"
-	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/go-edgekit/edgekit/internal/safelog"
 )
@@ -21,7 +19,8 @@ var ErrInvalidConfiguration = errors.New("invalid configuration")
 
 // Config is the configuration of a [Gateway]. [New] copies it, so later
 // changes to a Config value have no effect on the gateway. Values that Config
-// refers to, such as selectors and the transport, are shared with the gateway.
+// refers to, such as selectors, hook providers, and the transport, are shared
+// with the gateway.
 type Config struct {
 	// Routes are the routes of the gateway. At least one route is necessary.
 	Routes []Route
@@ -30,8 +29,29 @@ type Config struct {
 	// middleware is the outermost one.
 	Middleware []Middleware
 
+	// Hooks are the hook providers of the gateway. Each value must implement
+	// one or more of [RequestReceivedHook], [BeforeUpstreamHook],
+	// [UpstreamResponseHook], [RequestCompletedHook], and [HeaderOwner]. Nil
+	// values, also typed nil values, are not permitted.
+	//
+	// The first provider is the outermost one, closest to the client, as in
+	// Middleware. The hooks of each phase run serially. [RequestReceivedHook]
+	// and [BeforeUpstreamHook] hooks run in the order of this list, toward the
+	// upstream. [UpstreamResponseHook] and [RequestCompletedHook] hooks run in
+	// the reverse order, back toward the client. So a provider that changes the
+	// request and the response nests like middleware. The position orders a
+	// provider only among the hook providers: the stages of request handling
+	// have a fixed order (see [Gateway]). A value that occurs more than one
+	// time in the list runs one time for each occurrence.
+	//
+	// The gateway shares each value between concurrent requests, so the value
+	// must be safe for concurrent use. Keep request state in the
+	// [RequestContext], not in the value.
+	Hooks []any
+
 	// Transport sends requests to upstreams. If it is nil, the gateway uses its
-	// own transport from [NewTransport]. A transport that you set is yours: the
+	// own transport from [NewTransport]. A typed nil value, such as a nil
+	// pointer, is not permitted. A transport that you set is yours: the
 	// gateway does not close its connections.
 	//
 	// The transport must not decompress responses or add Accept-Encoding. New
@@ -42,8 +62,9 @@ type Config struct {
 	// ManagedHeaders are headers that the gateway or its extensions own, such
 	// as a header that tells the upstream the authenticated caller. The gateway
 	// removes them from inbound requests before any middleware runs, so only
-	// middleware can set them. Names must contain only ASCII letters, digits,
-	// and "-". Hop-by-hop, framing, and Host headers are not permitted.
+	// middleware and hooks can set them. Names must contain only ASCII letters,
+	// digits, and "-". Hop-by-hop, framing, and Host headers are not permitted.
+	// Extensions can also declare their managed headers with [HeaderOwner].
 	ManagedHeaders []string
 }
 
@@ -53,11 +74,13 @@ type Route struct {
 	// Prefix is the escaped path prefix that the route matches. It must start
 	// and end with "/", and it must be in escaped form. The match is
 	// case-sensitive. When more than one prefix matches, the longest one wins.
-	// The prefix "/api/" matches "/api/" and "/api/users", but not "/api".
+	// The prefix "/api/" matches "/api/" and "/api/users", but not "/api". The
+	// gateway does not redirect "/api" to "/api/".
 	Prefix string
 
-	// Upstream selects the upstream URL for the route. It is necessary. Use
-	// [StaticUpstream] for one fixed upstream.
+	// Upstream selects the upstream URL for the route. It is necessary. Nil
+	// values, also typed nil values, are not permitted. Use [StaticUpstream]
+	// for one fixed upstream.
 	Upstream UpstreamSelector
 
 	// Middleware wraps the handling of the requests that match the route,
@@ -72,18 +95,62 @@ type Route struct {
 //
 // The gateway handles each request in this order:
 //
-//  1. Check the request with the secure defaults (see below).
-//  2. Remove identity headers and managed headers.
-//  3. Run the global middleware.
-//  4. Match a route. If no route matches, send 404 Not Found.
-//  5. Run the route middleware.
-//  6. Select the upstream URL.
-//  7. Forward the request. The path is the upstream URL path followed by the
-//     inbound path. The query is the raw query of the request that the
-//     route middleware passes on, without changes. The Host header is the
-//     host of the upstream URL. The inbound Host goes in X-Forwarded-Host.
+//  1. Make the gateway context ([RequestContext]).
+//  2. Check the request with the secure defaults (see below).
+//  3. Remove identity headers and managed headers.
+//  4. Run the global middleware.
+//  5. Run the [RequestReceivedHook] hooks.
+//  6. Match a route. If no route matches, send 404 Not Found.
+//  7. Run the route middleware.
+//  8. Select the upstream URL.
+//  9. Rewrite the outbound request. The path is the upstream URL path
+//     followed by the inbound path. The query is the raw query of the
+//     request that the route middleware passes on, without changes. The Host
+//     header is the host of the upstream URL. The inbound Host goes in
+//     X-Forwarded-Host.
+//  10. Run the [BeforeUpstreamHook] hooks, then apply the outbound header
+//     rules (see below).
+//  11. Send the request with the transport.
+//  12. Run the [UpstreamResponseHook] hooks, apply the response header rules,
+//     and send the response.
+//  13. After the middleware returned or finished unwinding, run the
+//     [RequestCompletedHook] hooks.
 //
-// Middleware can end handling early. Then the later steps do not occur.
+// Middleware and hooks can end handling early. Then the later steps do not
+// occur, except completion. Completion also runs when the secure defaults
+// reject a request: then no middleware and no other hook runs, and the gateway
+// context has only the start time. [Completion] gives the execution facts,
+// such as the [RejectionReason] when the core rejected the request.
+//
+// # Lifecycle hooks
+//
+// Register hook providers in [Config.Hooks], which also sets the order of the
+// hooks in each phase. The stages above have a fixed order: for example, all
+// global middleware runs before any [RequestReceivedHook] hook. The middleware
+// and hooks of one request get the same [RequestContext].
+// Middleware runs before the hooks of the same stage: the route middleware
+// can set request state that the [BeforeUpstreamHook] hooks use.
+//
+// An error from a hook stops its phase and the handling of the request. A
+// panic in a hook or in middleware continues after completion ran. The
+// gateway does not recover it.
+//
+// # Failures
+//
+// The gateway sends these statuses when handling fails, with a body that
+// contains only the status text:
+//
+//   - 500 Internal Server Error for an error from a hook, from the upstream
+//     selector, or for a selected URL that does not obey the contract of
+//     [UpstreamSelector]. 500 also when middleware does not derive its
+//     context from the request context, so the gateway context is lost.
+//   - 502 Bad Gateway when the round trip to the upstream fails, such as for
+//     a connection failure, a timeout, or response headers that are too
+//     large.
+//
+// Completion gets the failure, with its phase, as a [Failure]. For a lost
+// gateway context, completion gets no Failure, because the stage that finds
+// the loss cannot get to the gateway context.
 //
 // # Secure defaults
 //
@@ -108,14 +175,15 @@ type Route struct {
 //   - Forwarded, X-Forwarded-*, X-Real-IP, X-Client-IP, True-Client-IP,
 //     X-Cluster-Client-IP, X-Original-Forwarded-For, CF-Connecting-IP,
 //     Fastly-Client-IP, X-Original-URL, and X-Rewrite-URL.
-//   - The headers in [Config.ManagedHeaders].
+//   - The headers in [Config.ManagedHeaders] and the headers that
+//     [HeaderOwner] values declare.
 //
 // It also removes these names from the inbound request trailers. Middleware
-// can set these headers again, and they go to the upstream. The gateway sets
-// X-Forwarded-For, X-Forwarded-Host, and X-Forwarded-Proto from the direct
-// peer. It does not trust forwarding headers from other proxies. It also
-// removes the names of these headers from the inbound Connection header, so a
-// client cannot make the proxy remove a header that middleware set.
+// and hooks can set these headers again, and they go to the upstream. The
+// gateway sets X-Forwarded-For, X-Forwarded-Host, and X-Forwarded-Proto from
+// the direct peer. It does not trust forwarding headers from other proxies. It
+// also removes the names of these headers from the inbound Connection header,
+// so a client cannot make the proxy remove a header that middleware set.
 //
 // The gateway removes hop-by-hop headers in both directions. It removes
 // Alt-Svc and hop-by-hop fields from responses, informational (1xx) responses,
@@ -127,8 +195,47 @@ type Route struct {
 // The gateway does not change the request that the caller gave to ServeHTTP.
 // Middleware must also not change it (see [Middleware]).
 //
-// If the upstream selection or the transport fails, the gateway sends
-// 502 Bad Gateway. Responses that the gateway makes contain no error details.
+// # Header rules after middleware and hooks
+//
+// For each proxied request, after the route middleware and the
+// [BeforeUpstreamHook] hooks, the gateway checks the complete outbound header
+// map and the outbound trailer names. The check also runs when no hook is
+// configured, because middleware can set the same entries:
+//
+//   - It restores Connection, Upgrade, Te, Keep-Alive, Proxy-Connection, and
+//     Proxy-Authorization to their values before the hooks.
+//   - It removes Host, Content-Length, Transfer-Encoding, and Trailer. The
+//     transport writes these from request fields.
+//   - A header or trailer name with characters other than ASCII letters,
+//     digits, and "-", or a header value with a control character other than
+//     horizontal tab, is a failure in [PhaseBeforeUpstream]. The gateway
+//     does not call the transport. The trailer values arrive while the body
+//     streams, so the gateway cannot check them.
+//
+// After the [UpstreamResponseHook] hooks, the gateway applies these rules to
+// a final response:
+//
+//   - It removes Connection and the fields that it names, Keep-Alive,
+//     Proxy-Connection, Proxy-Authenticate, Proxy-Authorization, Te, Trailer,
+//     Transfer-Encoding, Upgrade, and Alt-Svc. It reads all Connection
+//     entries, in all letter cases, before it removes a field.
+//   - It keeps Content-Length only when its entries, in all letter cases,
+//     give exactly one decimal value that fits in an int64. Otherwise it
+//     removes the field.
+//   - It removes the same names, and Content-Length and Host, from the
+//     trailer names.
+//
+// It applies these rules to a 101 Switching Protocols response:
+//
+//   - It removes the same fields as from a final response, and also
+//     Content-Length.
+//   - It restores the protocol switch of the upstream: the Upgrade values
+//     under the canonical name, and Connection set to "Upgrade" when the
+//     upstream's Connection contained the Upgrade token. Changes by the hooks
+//     to these fields have no effect.
+//
+// A hook that changes the status of a 101 response, or changes another status
+// to one outside 200 to 599, causes a failure in [PhaseUpstreamResponse].
 //
 // # Deviations from HTTP specifications
 //
@@ -156,6 +263,7 @@ type Route struct {
 // calls it.
 type Gateway struct {
 	handler        http.Handler
+	hooks          hooks
 	managedHeaders map[string]struct{}
 	ownedTransport *http.Transport
 }
@@ -166,11 +274,13 @@ type route struct {
 	handler http.Handler
 }
 
-// upstreamKey is the context key for the selected upstream URL of a request.
-type upstreamKey struct{}
+// lostContextLog records that middleware did not derive its context from the
+// request context. The event has no request data.
+var lostContextLog = safelog.New("gateway_context_lost")
 
 // New makes a gateway from cfg. It validates the complete configuration and
-// prepares the handlers for all routes, so request handling does no setup.
+// prepares the handlers for all routes and the hook lists, so request handling
+// does no setup.
 //
 // If cfg is not valid, New returns an error that wraps
 // [ErrInvalidConfiguration], with one wrapped error for each problem. The
@@ -178,18 +288,18 @@ type upstreamKey struct{}
 // do not contain configuration values.
 //
 // New works in two phases. First it checks the structure of cfg. If it finds a
-// problem, it returns the errors and calls no middleware function. Then it
-// calls each middleware function one time to build the handlers, and checks
+// problem, it returns the errors and calls no middleware function. In this
+// phase, it calls only the ManagedHeaders method of [HeaderOwner] values. Then
+// it calls each middleware function one time to build the handlers, and checks
 // the handlers that they return. New does not change process-wide state, such
 // as the default logger.
 func New(cfg Config) (*Gateway, error) {
-	managedHeaders, problems := checkConfig(cfg)
+	g := &Gateway{}
+
+	var problems []error
+	g.hooks, g.managedHeaders, problems = checkConfig(cfg)
 	if len(problems) != 0 {
 		return nil, errors.Join(problems...)
-	}
-
-	g := &Gateway{
-		managedHeaders: managedHeaders,
 	}
 
 	transport := cfg.Transport
@@ -198,7 +308,7 @@ func New(cfg Config) (*Gateway, error) {
 		transport = g.ownedTransport
 	}
 
-	handler, problems := buildHandler(cfg, newProxy(transport))
+	handler, problems := g.buildHandler(cfg, g.newProxy(transport))
 	if len(problems) != 0 {
 		return nil, errors.Join(problems...)
 	}
@@ -212,13 +322,44 @@ func New(cfg Config) (*Gateway, error) {
 // not change r. The middleware can get r itself, so the middleware must also
 // not change it (see [Middleware]).
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if status := checkRequest(r); status != 0 {
+	rc := &RequestContext{
+		start: time.Now(),
+	}
+	ctx := context.WithValue(r.Context(), requestContextKey{}, rc)
+
+	returned := false
+	defer func() {
+		g.complete(ctx, rc, !returned)
+	}()
+
+	if status, reason := checkRequest(r); status != 0 {
+		rc.rejection = reason
 		reject(w, status)
+		returned = true
 
 		return
 	}
 
-	g.handler.ServeHTTP(w, g.stripHeaders(r))
+	// WithContext makes a shallow copy. stripHeaders gives it its own maps
+	// when it removes headers.
+	inner := r.WithContext(ctx)
+	g.stripHeaders(inner)
+	g.handler.ServeHTTP(w, inner)
+	returned = true
+}
+
+// complete runs during a panic too, and lets the panic continue.
+func (g *Gateway) complete(ctx context.Context, rc *RequestContext, aborted bool) {
+	// A completion hook must not panic, but the state is dropped also when
+	// one does.
+	defer rc.end()
+
+	if len(g.hooks.completed) != 0 {
+		duration := time.Since(rc.start)
+		for _, hook := range g.hooks.completed {
+			hook.RequestCompleted(ctx, rc, rc.completion(duration, aborted))
+		}
+	}
 }
 
 // CloseIdleConnections closes the idle upstream connections of the transport
@@ -231,124 +372,9 @@ func (g *Gateway) CloseIdleConnections() {
 	}
 }
 
-// invalid returns a configuration problem that wraps ErrInvalidConfiguration.
-func invalid(format string, args ...any) error {
-	problem := fmt.Errorf(format, args...)
-
-	return fmt.Errorf("%w: %w", ErrInvalidConfiguration, problem)
-}
-
-// checkConfig checks the structure of cfg without calling a middleware
-// function, and returns the canonical managed header names.
-func checkConfig(cfg Config) (map[string]struct{}, []error) {
-	managedHeaders, problems := checkManagedHeaders(cfg.ManagedHeaders)
-
-	if err := checkTransport(cfg.Transport); err != nil {
-		problems = append(problems, invalid("transport: %w", err))
-	}
-
-	problems = append(problems, checkRoutes(cfg.Routes)...)
-
-	if i := slices.IndexFunc(cfg.Middleware, isNil); i >= 0 {
-		problems = append(problems, invalid("middleware %d: is nil", i))
-	}
-
-	return managedHeaders, problems
-}
-
-// checkManagedHeaders returns the canonical names, which are unique.
-func checkManagedHeaders(names []string) (map[string]struct{}, []error) {
-	var problems []error
-
-	canonicalNames := make(map[string]struct{}, len(names))
-	for i, name := range names {
-		if err := checkManagedHeader(name); err != nil {
-			problems = append(problems, invalid("managed header %d: %w", i, err))
-
-			continue
-		}
-
-		canonical := textproto.CanonicalMIMEHeaderKey(name)
-		if _, ok := canonicalNames[canonical]; ok {
-			problems = append(problems, invalid("managed header %d: is a duplicate", i))
-		}
-
-		canonicalNames[canonical] = struct{}{}
-	}
-
-	return canonicalNames, problems
-}
-
-// checkTransport accepts nil, which means the gateway's own transport.
-func checkTransport(transport http.RoundTripper) error {
-	if t, ok := transport.(*http.Transport); ok {
-		switch {
-		case t == nil:
-			return errors.New("is a nil *http.Transport")
-		case !t.DisableCompression:
-			return errors.New("does transparent compression")
-		}
-	}
-
-	return nil
-}
-
-// checkRoutes checks the routes without calling a middleware function.
-func checkRoutes(routes []Route) []error {
-	var problems []error
-
-	if len(routes) == 0 {
-		problems = append(problems, invalid("routes: no route is configured"))
-	}
-
-	seen := make(map[string]struct{}, len(routes))
-	for i, r := range routes {
-		if err := checkPrefix(r.Prefix); err != nil {
-			problems = append(problems, invalid("route %d: prefix: %w", i, err))
-		} else if _, ok := seen[r.Prefix]; ok {
-			problems = append(problems, invalid("route %d: prefix: is a duplicate", i))
-		}
-
-		seen[r.Prefix] = struct{}{}
-
-		if isNilSelector(r.Upstream) {
-			problems = append(problems, invalid("route %d: upstream selector is nil", i))
-		}
-
-		if j := slices.IndexFunc(r.Middleware, isNil); j >= 0 {
-			problems = append(problems, invalid("route %d: middleware %d: is nil", i, j))
-		}
-	}
-
-	return problems
-}
-
-// isNilSelector also detects a nil UpstreamSelectorFunc, which is a non-nil
-// interface value that panics when the gateway calls it.
-func isNilSelector(selector UpstreamSelector) bool {
-	if f, ok := selector.(UpstreamSelectorFunc); ok {
-		return f == nil
-	}
-
-	return selector == nil
-}
-
-// newProxy returns the proxy that all routes share.
-func newProxy(transport http.RoundTripper) *httputil.ReverseProxy {
-	return &httputil.ReverseProxy{
-		Rewrite:        rewrite,
-		Transport:      transport,
-		ErrorLog:       safelog.New("reverse_proxy"),
-		ModifyResponse: modifyResponse,
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
-			reject(w, http.StatusBadGateway)
-		},
-	}
-}
-
 // buildHandler calls each middleware function one time, so cfg must have
 // passed checkConfig.
-func buildHandler(cfg Config, proxy *httputil.ReverseProxy) (http.Handler, []error) {
+func (g *Gateway) buildHandler(cfg Config, proxy *httputil.ReverseProxy) (http.Handler, []error) {
 	var problems []error
 
 	routes := make([]route, 0, len(cfg.Routes))
@@ -371,7 +397,7 @@ func buildHandler(cfg Config, proxy *httputil.ReverseProxy) (http.Handler, []err
 		return cmp.Compare(len(b.prefix), len(a.prefix))
 	})
 
-	handler, err := chain(router(routes), cfg.Middleware)
+	handler, err := chain(g.router(routes), cfg.Middleware)
 	if err != nil {
 		problems = append(problems, invalid("%w", err))
 	}
@@ -379,99 +405,47 @@ func buildHandler(cfg Config, proxy *httputil.ReverseProxy) (http.Handler, []err
 	return handler, problems
 }
 
-// checkManagedHeader returns an error if name cannot be a managed header.
-func checkManagedHeader(name string) error {
-	if !headerNameAllowed(name) {
-		return errors.New("name contains characters other than letters, digits, and -")
-	}
-
-	if _, ok := reservedHeaders[textproto.CanonicalMIMEHeaderKey(name)]; ok {
-		return errors.New("is a hop-by-hop, framing, or Host header")
-	}
-
-	return nil
-}
-
-// checkPrefix returns an error if prefix is not a valid route prefix.
-func checkPrefix(prefix string) error {
-	if !strings.HasPrefix(prefix, "/") || !strings.HasSuffix(prefix, "/") {
-		return errors.New("does not start and end with /")
-	}
-
-	// The router compares the prefix with EscapedPath, so the prefix must be
-	// the escaped form that EscapedPath gives for it.
-	decoded, err := url.PathUnescape(prefix)
-	if err != nil || (&url.URL{Path: decoded, RawPath: prefix}).EscapedPath() != prefix {
-		return errors.New("is not in escaped form")
-	}
-
-	if !pathAllowed(prefix) {
-		return errors.New("does not obey the path policy")
-	}
-
-	return nil
-}
-
-// router calls the first route whose prefix matches, so routes must be sorted
-// with the longest prefix first.
-func router(routes []route) http.Handler {
+// router runs the RequestReceived hooks and then calls the first route whose
+// prefix matches, so routes must be sorted with the longest prefix first.
+func (g *Gateway) router(routes []route) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rc, ok := requestContext(w, r)
+		if !ok {
+			return
+		}
+
+		for _, hook := range g.hooks.received {
+			if err := hook.RequestReceived(r.Context(), rc, r); err != nil {
+				rc.fail(PhaseRequestReceived, err)
+				reject(w, http.StatusInternalServerError)
+
+				return
+			}
+		}
+
 		path := r.URL.EscapedPath()
 		for _, rt := range routes {
 			if strings.HasPrefix(path, rt.prefix) {
+				rc.route = rt.prefix
 				rt.handler.ServeHTTP(w, r)
 
 				return
 			}
 		}
 
+		rc.rejection = ReasonNoRoute
 		reject(w, http.StatusNotFound)
 	})
 }
 
-// forward selects the upstream after the route middleware ran, and gives it to
-// rewrite through the request context.
-func forward(proxy *httputil.ReverseProxy, selector UpstreamSelector) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		selected, err := selector.SelectUpstream(r)
-		if err == nil {
-			err = checkUpstreamURL(selected)
-		}
-
-		if err != nil {
-			reject(w, http.StatusBadGateway)
-
-			return
-		}
-
-		upstream := *selected
-		r = r.WithContext(context.WithValue(r.Context(), upstreamKey{}, &upstream))
-		proxy.ServeHTTP(newInformationalWriter(w), r)
-
-		// The server sends the trailers after the handlers return, so a
-		// removal here is still in time.
-		removeTrailers(w.Header())
-	})
-}
-
-// rewrite runs after ReverseProxy removed the hop-by-hop and inbound
-// forwarding headers.
-func rewrite(pr *httputil.ProxyRequest) {
-	// forward always sets the upstream. Without it, the outbound URL has no
-	// scheme or host, so the transport fails and the client gets 502.
-	if upstream, ok := pr.In.Context().Value(upstreamKey{}).(*url.URL); ok {
-		pr.SetURL(upstream)
+// requestContext fails closed when middleware did not derive its context from
+// the request context: it sends 500 and reports false.
+func requestContext(w http.ResponseWriter, r *http.Request) (*RequestContext, bool) {
+	rc, ok := FromContext(r.Context())
+	if !ok {
+		lostContextLog.Print("lost")
+		reject(w, http.StatusInternalServerError)
 	}
 
-	// ReverseProxy removes the query parameters that it cannot parse before
-	// Rewrite runs. The upstream URL has no query, so the inbound query is
-	// the complete outbound query.
-	pr.Out.URL.RawQuery = pr.In.URL.RawQuery
-
-	pr.SetXForwarded()
-}
-
-// reject sends a response with status and a body without details.
-func reject(w http.ResponseWriter, status int) {
-	http.Error(w, http.StatusText(status), status)
+	return rc, ok
 }
