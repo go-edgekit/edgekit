@@ -26,3 +26,5 @@ The module path changes from `example.com/go-gateway-starter` to a real public p
 
 - **One module with all dependencies:** Simple releases, heavy core.
 - **A core key-value store interface:** Repeats the model of one shared store for everything and cannot fit each extension's consistency needs.
+
+**Note 2026-11-04:** The module path is `github.com/go-edgekit/edgekit`, with the Apache-2.0 license.

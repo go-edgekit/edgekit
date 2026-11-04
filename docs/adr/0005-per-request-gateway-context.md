@@ -18,7 +18,7 @@ This architectural direction is accepted; exact Go types, accessor names, and st
 
 - Keep gateway metadata private, with a small read-only public view: start time, matched route, and selected upstream when available. Final execution facts are supplied to completion as a snapshot; they need not be duplicated as mutable request-context fields.
 - Store mutable request-scoped extension data on the gateway context, **not** on shared extension instances. Extension instances may own separately synchronized cross-request counters, caches, and other explicitly shared state.
-- Use private, identity-based typed keys for extension-owned state. Do not expose a shared `map[string]any` keyed by extension-defined strings. The current `StateKey`, `SetState`, and `GetState` experiment demonstrates this direction without freezing those signatures.
+- Use private, identity-based typed keys for extension-owned state. Do not expose a shared `map[string]any` keyed by extension-defined strings. The `NewStateKey`, `SetState`, and `State` functions implement this direction; their signatures stay provisional until v1.
 - Do not depend on another extension's internal fields. Any cross-extension state-sharing contract must be explicit.
 
 ### Concurrency and lifetime
@@ -53,6 +53,6 @@ Extensions needing correlation at completion must explicitly snapshot identifier
 
 ## Validation / follow-up
 
-Existing lifecycle tests verify the same gateway-context identity in global middleware, route middleware, and hooks, as well as typed-key isolation, stored nil values, cancellation, and state isolation across concurrent requests.
+Tests verify the same gateway-context identity in global middleware, route middleware, and hooks, as well as typed-key isolation, stored nil values, cancellation, and state isolation across concurrent requests.
 
-The access-log experiment verifies that middleware-derived trace identifiers remain available in completion records even though completion receives the entry context after tracing middleware unwinds. Preserve these tests and explicitly review this ADR before introducing per-request concurrent callbacks or asynchronous middleware.
+Middleware-derived trace identifiers must remain available in completion records, although completion receives the entry context after tracing middleware unwinds. The access-log experiment of the first implementation (tag `prototype-final`) showed this; the access-log extension must keep it under test. Explicitly review this ADR before introducing per-request concurrent callbacks or asynchronous middleware.

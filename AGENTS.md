@@ -70,10 +70,11 @@ or change the glossary deliberately. Do not use the word.
   it, and its contract. The contract includes concurrency safety, ownership
   and lifetime of values, errors, and security implications.
 - Show the main entry points with testable `Example` functions.
-- The GoDoc of an unexported identifier is one sentence. State what the name
-  does not show: a precondition, an invariant, a side effect, or why it
-  exists. Do not describe how it works. If the name already says everything,
-  write one plain sentence.
+- Keep the GoDoc of an unexported identifier short and concise. Prefer one
+  sentence, but use more when a constraint or invariant needs it. State what
+  the name does not show: a precondition, an invariant, a side effect, or why
+  it exists. Do not describe how it works. If the name already says
+  everything, write one plain sentence.
 
 ## Tests
 

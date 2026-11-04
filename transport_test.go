@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"io"
 	"net"
@@ -12,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/http/httptrace"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -520,6 +523,101 @@ func TestNoTransparentCompression(t *testing.T) {
 
 			if !bytes.Equal(w.Body.Bytes(), tc.wantBody) {
 				t.Errorf("client body = %q, want %q", w.Body.Bytes(), tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestUpstreamHeaderLimitBeforeResponseHooks(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		http2 bool
+	}{
+		{
+			name: "HTTP/1.1",
+		},
+		{
+			name:  "HTTP/2",
+			http2: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var wrongProto atomic.Bool
+			upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.http2 != (r.ProtoMajor == 2) {
+					wrongProto.Store(true)
+				}
+
+				// The default limit of NewTransport is 64 KiB.
+				size := 1 << 10
+				if strings.Contains(r.URL.Path, "large") {
+					size = 128 << 10
+				}
+
+				w.Header().Set("X-Large", strings.Repeat("h", size))
+				_, _ = io.WriteString(w, "ok")
+			}))
+			transport := testTransport(t)
+			if tc.http2 {
+				upstream.EnableHTTP2 = true
+				upstream.StartTLS()
+
+				roots := x509.NewCertPool()
+				roots.AddCert(upstream.Certificate())
+				transport.TLSClientConfig = &tls.Config{
+					RootCAs:    roots,
+					MinVersion: tls.VersionTLS12,
+				}
+			} else {
+				upstream.Start()
+			}
+			defer upstream.Close()
+
+			var responses int
+			hooks := upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) error {
+				responses++
+
+				return nil
+			})
+			completionHooks, completed := completions()
+			g := newGateway(t, edgekit.Config{
+				Routes: []edgekit.Route{{
+					Prefix:   "/api/",
+					Upstream: static(t, upstream.URL),
+				}},
+				Transport: transport,
+				Hooks:     []any{hooks, completionHooks},
+			})
+
+			for _, path := range []string{"/api/small", "/api/large", "/api/small-again"} {
+				before := responses
+				w := httptest.NewRecorder()
+				g.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+				c := receive(t, completed)
+
+				if path == "/api/large" {
+					if w.Code != http.StatusBadGateway || w.Body.String() != "Bad Gateway\n" || w.Header().Get("X-Large") != "" {
+						t.Errorf("%s: response = %d %q, X-Large %d bytes; want 502 without the header", path, w.Code, w.Body.String(), len(w.Header().Get("X-Large")))
+					}
+
+					if responses != before || c.Failure == nil || c.Failure.Phase != edgekit.PhaseRoundTrip || c.Aborted {
+						t.Errorf("%s: response hooks ran %d times, completion = %+v; want 0 and a round-trip failure", path, responses-before, c)
+					}
+
+					continue
+				}
+
+				if w.Code != http.StatusOK || w.Body.String() != "ok" || len(w.Header().Get("X-Large")) != 1<<10 {
+					t.Errorf("%s: response = %d %q, X-Large %d bytes; want 200 with 1 KiB", path, w.Code, w.Body.String(), len(w.Header().Get("X-Large")))
+				}
+
+				if responses != before+1 || c.Failure != nil || c.Aborted {
+					t.Errorf("%s: response hooks ran %d times, completion = %+v; want 1 and no failure", path, responses-before, c)
+				}
+			}
+
+			if wrongProto.Load() {
+				t.Errorf("upstream got a protocol other than %s", tc.name)
 			}
 		})
 	}

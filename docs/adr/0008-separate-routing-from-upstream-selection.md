@@ -32,8 +32,8 @@ Only add a public `UpstreamSelector` interface when a concrete alternative to st
 
 ## Validation / follow-up
 
-Initially test two static routes. Later test a custom selector choosing between two upstreams without altering route matching or the reverse-proxy implementation.
+Test two static routes, and a custom selector that chooses between two upstreams without changes to route matching or the reverse-proxy implementation.
 
-**Accepted 2026-11-01:** The core rewrite defines the upstream-selector extension point, with static selection as the default. Bundled load balancing and health checks remain deferred.
+**Accepted 2026-11-01:** The core defines the upstream-selector extension point, with static selection as the default. Bundled load balancing and health checks remain deferred.
 
-**Note 2026-11-03:** The condition in the decision is met. The first concrete alternative is a selector that uses request data from route middleware, such as a region. The public `UpstreamSelector` interface exists from slice 1 of the core rewrite.
+**Note 2026-11-03:** The condition in the decision is met. The first concrete alternative is a selector that uses request data from route middleware, such as a region. The public `UpstreamSelector` interface exists, with `StaticUpstream` as the default.

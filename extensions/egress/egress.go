@@ -64,9 +64,18 @@ func New(template *http.Transport, config Config) (*Transport, error) {
 	p := &Transport{origins: make(map[string]struct{}), peers: make(map[string]struct{})}
 	for i, raw := range config.AllowedOrigins {
 		u, err := url.Parse(raw)
-		if err != nil || (u.Path != "" && u.Path != "/") || u.RawPath != "" || u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "#") {
+		if err != nil {
 			return nil, fmt.Errorf("egress: invalid origin at index %d", i)
 		}
+
+		if u.Path != "" && u.Path != "/" ||
+			u.RawPath != "" ||
+			u.RawQuery != "" ||
+			u.ForceQuery ||
+			strings.Contains(raw, "#") {
+			return nil, fmt.Errorf("egress: invalid origin at index %d", i)
+		}
+
 		origin, peer, err := destination(u)
 		if err != nil {
 			return nil, fmt.Errorf("egress: invalid origin at index %d", i)
@@ -217,9 +226,22 @@ func (p *Transport) allowedIP(ip netip.Addr) bool {
 
 // destination returns a canonical origin and the corresponding dial authority.
 func destination(u *url.URL) (string, string, error) {
-	if u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.Opaque != "" || u.Fragment != "" || u.RawFragment != "" {
+	if u == nil {
 		return "", "", ErrDenied
 	}
+
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", "", ErrDenied
+	}
+
+	if u.User != nil || u.Opaque != "" {
+		return "", "", ErrDenied
+	}
+
+	if u.Fragment != "" || u.RawFragment != "" {
+		return "", "", ErrDenied
+	}
+
 	host := u.Hostname()
 	port := u.Port()
 	authority := host
