@@ -11,8 +11,12 @@ import (
 //
 // Middleware uses the standard net/http model, so existing middleware packages
 // work without changes. A middleware must call next synchronously and at most
-// once. Middleware that returns while the next handler continues, such as
-// [http.TimeoutHandler], is not supported.
+// once. A middleware that calls next must not write a final status or a body,
+// or flush or hijack the response, before it calls next, because the gateway
+// can then not send a rejection or a failure. Setting response headers and
+// sending informational (1xx) responses before next is permitted. Middleware
+// that returns while the next handler continues, such as [http.TimeoutHandler],
+// is not supported.
 //
 // A middleware must not change the request that it gets, as [http.Handler]
 // also requires. The request can be the request that the caller gave to

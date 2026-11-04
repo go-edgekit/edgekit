@@ -28,3 +28,5 @@ ADR-0009's ownership of execution facts, HTTP observations, and interpretations 
 
 - **Let hooks write responses directly:** Rejected in ADR-0009.
 - **Plain-text default body:** Simpler, but not a standard machine-readable format.
+
+**Amended 2026-11-04:** [ADR-0022](0022-rejections-and-the-problem-response.md) defines the rejection value as a separate result of the processing hooks, its validation, the reason codes of extensions, a renderer that makes only the body, and the exact default body.

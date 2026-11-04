@@ -2,10 +2,13 @@ package edgekit
 
 import (
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/textproto"
 	"net/url"
 	"slices"
+	"sync/atomic"
 )
 
 // OutboundRequest gives a [BeforeUpstreamHook] the rewritten outbound
@@ -65,6 +68,10 @@ var (
 	errInvalidOutboundValue = errors.New("outbound header value is invalid")
 )
 
+// errUpgradeBodyNotWritable is the failure when the transport returns a 101
+// response with a body that ReverseProxy cannot write to.
+var errUpgradeBodyNotWritable = errors.New("transport returned a 101 response with a body that cannot be written")
+
 // connectionFields are the outbound hop-by-hop fields that the core owns. The
 // BeforeUpstream hooks cannot change them.
 var connectionFields = [...]string{
@@ -99,8 +106,6 @@ func (t *outboundTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	rc, _ := FromContext(r.Context())
 
 	if err := t.prepare(rc, r); err != nil {
-		rc.fail(PhaseBeforeUpstream, err)
-
 		// A RoundTripper must close the body, also when it fails.
 		if r.Body != nil {
 			_ = r.Body.Close()
@@ -109,11 +114,31 @@ func (t *outboundTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 
-	resp, err := t.base.RoundTrip(r)
+	// Only the transport gets the trace. The UpstreamResponse hooks get the
+	// context of r, so their own requests cannot set the facts.
+	facts := &transportFacts{}
+	rc.facts = facts
+	traced := r.WithContext(httptrace.WithClientTrace(r.Context(), facts.clientTrace()))
+
+	resp, err := t.base.RoundTrip(traced)
 	if err != nil {
 		rc.fail(PhaseRoundTrip, err)
 
 		return nil, err
+	}
+
+	// ReverseProxy would report this body without a source. The response
+	// hooks do not run, because the transport broke its contract.
+	if resp.StatusCode == http.StatusSwitchingProtocols {
+		if _, ok := resp.Body.(io.ReadWriteCloser); !ok {
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+
+			rc.failDefect(PhaseRoundTrip, errUpgradeBodyNotWritable)
+
+			return nil, errUpgradeBodyNotWritable
+		}
 	}
 
 	// The UpstreamResponse hooks get their context and the gateway context
@@ -127,7 +152,7 @@ func (t *outboundTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 // prepare runs the BeforeUpstream hooks and then the outbound header check,
 // also without hooks, because middleware can set the same entries (ADR-0019).
 // It changes the header map of r, which ReverseProxy made for this request
-// only.
+// only. It records a failure or a rejection in rc.
 func (t *outboundTransport) prepare(rc *RequestContext, r *http.Request) error {
 	var saved [len(connectionFields)][]string
 	for i, name := range connectionFields {
@@ -140,12 +165,42 @@ func (t *outboundTransport) prepare(rc *RequestContext, r *http.Request) error {
 	}()
 
 	for _, hook := range t.hooks {
-		if err := hook.BeforeUpstream(r.Context(), rc, &rc.outbound); err != nil {
+		rejection, hookErr := hook.BeforeUpstream(r.Context(), rc, &rc.outbound)
+		if err := rc.hookResult(PhaseBeforeUpstream, rejection, hookErr); err != nil {
 			return err
 		}
 	}
 
-	return sanitizeOutbound(r, &saved)
+	if err := sanitizeOutbound(r, &saved); err != nil {
+		rc.failDefect(PhaseBeforeUpstream, err)
+
+		return err
+	}
+
+	return nil
+}
+
+// transportFacts holds the trace events of the transport (ADR-0023). The
+// callbacks can run on other goroutines, also after completion, so they
+// change only this value.
+type transportFacts struct {
+	connected atomic.Bool
+	written   atomic.Bool
+}
+
+// clientTrace returns the hooks that set the facts for each attempt of the
+// round trip.
+func (f *transportFacts) clientTrace() *httptrace.ClientTrace {
+	return &httptrace.ClientTrace{
+		GotConn: func(httptrace.GotConnInfo) {
+			f.connected.Store(true)
+		},
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			if info.Err == nil {
+				f.written.Store(true)
+			}
+		},
+	}
 }
 
 // sanitizeOutbound needs the values that connectionFields had before the

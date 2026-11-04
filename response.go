@@ -1,13 +1,17 @@
 package edgekit
 
 import (
+	"bufio"
 	"errors"
+	"io"
 	"iter"
+	"net"
 	"net/http"
 	"net/textproto"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // altSvc advertises upstream alternative services that are not valid for the
@@ -60,9 +64,45 @@ type upgradeProtocol struct {
 	token bool
 }
 
+// upgradeBody lets the gateway and ReverseProxy share a body without closing
+// the underlying body more than once.
+type upgradeBody struct {
+	io.ReadWriteCloser
+
+	once sync.Once
+	err  error
+}
+
+// Close calls the underlying body once and returns the same error to each
+// caller. It is safe for concurrent use.
+func (b *upgradeBody) Close() error {
+	b.once.Do(func() {
+		b.err = b.ReadWriteCloser.Close()
+	})
+
+	return b.err
+}
+
+// upgradeBodyWithCloseWrite keeps the half-close support that ReverseProxy
+// uses when one direction of the stream ends.
+type upgradeBodyWithCloseWrite struct {
+	*upgradeBody
+
+	closeWrite func() error
+}
+
+// CloseWrite keeps the half-close separate from a full close of the body.
+func (b *upgradeBodyWithCloseWrite) CloseWrite() error {
+	return b.closeWrite()
+}
+
 // errStatusChanged is the failure when an UpstreamResponse hook changes the
 // status across the 101 boundary or to a status that is not final.
 var errStatusChanged = errors.New("hook changed the response status across the 101 boundary or to a status that is not 200 to 599")
+
+// errUpgradeBodyReplaced is the failure when a hook replaces the body of a 101
+// response with a body that ReverseProxy cannot write to.
+var errUpgradeBodyReplaced = errors.New("hook replaced the body of a 101 response with a body that cannot be written")
 
 // modifyResponse returns a hook error, so ReverseProxy closes the body and
 // calls the error handler.
@@ -82,9 +122,14 @@ func (g *Gateway) modifyResponse(resp *http.Response) error {
 	}
 
 	for _, hook := range g.hooks.responses {
-		if err := hook.UpstreamResponse(ctx, rc, resp); err != nil {
-			rc.fail(PhaseUpstreamResponse, err)
+		rejection, hookErr := hook.UpstreamResponse(ctx, rc, resp)
 
+		// ReverseProxy closes and copies the body without a nil check.
+		if resp.Body == nil {
+			resp.Body = http.NoBody
+		}
+
+		if err := rc.hookResult(PhaseUpstreamResponse, rejection, hookErr); err != nil {
 			return err
 		}
 	}
@@ -92,13 +137,35 @@ func (g *Gateway) modifyResponse(resp *http.Response) error {
 	// ReverseProxy chose the upgrade path before ModifyResponse, so a hook
 	// cannot move the response across the 101 boundary.
 	if !statusAllowed(upgrade, resp.StatusCode) {
-		rc.fail(PhaseUpstreamResponse, errStatusChanged)
+		rc.failDefect(PhaseUpstreamResponse, errStatusChanged)
 
 		return errStatusChanged
 	}
 
 	if upgrade {
+		// outboundTransport checked the body of the transport, so a body
+		// that cannot be written comes from a hook.
+		body, ok := resp.Body.(io.ReadWriteCloser)
+		if !ok {
+			rc.failDefect(PhaseUpstreamResponse, errUpgradeBodyReplaced)
+
+			return errUpgradeBodyReplaced
+		}
+
 		sanitizeUpgrade(resp.Header, protocol)
+		shared := &upgradeBody{
+			ReadWriteCloser: body,
+		}
+		resp.Body = shared
+		if closer, ok := body.(interface{ CloseWrite() error }); ok {
+			resp.Body = &upgradeBodyWithCloseWrite{
+				upgradeBody: shared,
+				closeWrite:  closer.CloseWrite,
+			}
+		}
+
+		rc.switching = true
+		rc.upgradeBody = shared
 
 		return nil
 	}
@@ -270,12 +337,17 @@ func removeTrailers(header http.Header) {
 	}
 }
 
-// informationalWriter exists because ReverseProxy forwards 1xx headers without
-// removing hop-by-hop fields (golang/go#81319), and up to Go 1.26 sends and
-// then clears the response headers that middleware set before the upstream
-// responded (golang/go#81207).
-type informationalWriter struct {
+// proxyWriter is the response writer of ReverseProxy. It exists because
+// ReverseProxy forwards 1xx headers without removing hop-by-hop fields
+// (golang/go#81319), and up to Go 1.26 sends and then clears the response
+// headers that middleware set before the upstream responded
+// (golang/go#81207). It also records in the gateway context when the final
+// response is committed, so the gateway never renders after that, and the
+// source of a failed hijack.
+type proxyWriter struct {
 	http.ResponseWriter
+
+	rc *RequestContext
 
 	// before holds the response headers that middleware set before the proxy
 	// ran. It is nil when there were none.
@@ -286,20 +358,23 @@ type informationalWriter struct {
 	cleared bool
 }
 
-// newInformationalWriter must be called before the proxy runs, so it can save
-// the headers that middleware set.
-func newInformationalWriter(w http.ResponseWriter) *informationalWriter {
-	iw := &informationalWriter{ResponseWriter: w}
+// newProxyWriter must be called before the proxy runs, so it can save the
+// headers that middleware set.
+func newProxyWriter(w http.ResponseWriter, rc *RequestContext) *proxyWriter {
+	pw := &proxyWriter{
+		ResponseWriter: w,
+		rc:             rc,
+	}
 	if header := w.Header(); len(header) != 0 {
-		iw.before = header.Clone()
+		pw.before = header.Clone()
 	}
 
-	return iw
+	return pw
 }
 
 // Header restores the middleware headers that ReverseProxy cleared after a 1xx
 // response.
-func (w *informationalWriter) Header() http.Header {
+func (w *proxyWriter) Header() http.Header {
 	header := w.ResponseWriter.Header()
 	if w.cleared {
 		w.cleared = false
@@ -313,7 +388,7 @@ func (w *informationalWriter) Header() http.Header {
 
 // WriteHeader changes the shared header map, which ReverseProxy clears after
 // each 1xx status.
-func (w *informationalWriter) WriteHeader(status int) {
+func (w *proxyWriter) WriteHeader(status int) {
 	header := w.Header()
 
 	// An upgrade needs the Connection and Upgrade headers of its 101 response.
@@ -337,12 +412,59 @@ func (w *informationalWriter) WriteHeader(status int) {
 		}
 
 		w.cleared = w.before != nil
+	} else if status >= 200 {
+		w.rc.committed = true
 	}
 
 	w.ResponseWriter.WriteHeader(status)
 }
 
-// Unwrap lets ReverseProxy flush and hijack through http.ResponseController.
-func (w *informationalWriter) Unwrap() http.ResponseWriter {
+// Write commits the response, also when b is empty.
+func (w *proxyWriter) Write(b []byte) (int, error) {
+	w.rc.committed = true
+
+	return w.ResponseWriter.Write(b)
+}
+
+// FlushError commits the response, also when it fails, because the headers
+// can be sent already. http.ResponseController prefers it to Flush.
+func (w *proxyWriter) FlushError() error {
+	w.rc.committed = true
+
+	return http.NewResponseController(w.ResponseWriter).Flush()
+}
+
+// Hijack records the source of a failure, which ReverseProxy reports without
+// one (ADR-0023). After a hijack, the response is committed.
+func (w *proxyWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	conn, buffered, err := http.NewResponseController(w.ResponseWriter).Hijack()
+	switch {
+	case errors.Is(err, http.ErrHijacked):
+		// Another component owns the client connection, so no response is
+		// possible (ADR-0023).
+		w.rc.committed = true
+		w.rc.fail(PhaseProtocolSwitch, err)
+
+		return nil, nil, err
+	case errors.Is(err, http.ErrNotSupported):
+		// The writer cannot hijack: a defect of the embedder.
+		w.rc.failDefect(PhaseProtocolSwitch, err)
+
+		return nil, nil, err
+	case err != nil:
+		// The error does not show its source.
+		w.rc.fail(PhaseProtocolSwitch, err)
+
+		return nil, nil, err
+	}
+
+	w.rc.committed = true
+
+	return conn, buffered, nil
+}
+
+// Unwrap lets http.ResponseController reach the other capabilities of the
+// writer, such as deadlines.
+func (w *proxyWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }

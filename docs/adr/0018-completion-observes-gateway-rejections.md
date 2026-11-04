@@ -78,3 +78,5 @@ ADR-0009's completion guarantee includes gateway-owned rejections: completion ru
 ## Validation / follow-up
 
 Tests verify the reason code for each secure-default check, that no middleware and no processing hook runs, and that the gateway context has only the start time. Tests verify `no_route` together with the state that global middleware set, and a missing trailing slash as a routing miss.
+
+**Amended 2026-11-04:** [ADR-0022](0022-rejections-and-the-problem-response.md) lets a hook supply the reason through a valid rejection, with a code of the form `<extension>.<check>`; the codes of the core never contain `.`. [ADR-0023](0023-failure-evidence-and-transport-facts.md) adds the core code `invalid_upgrade`.

@@ -47,6 +47,7 @@ func TestSecureDefaultsRejectBeforeMiddleware(t *testing.T) {
 		header  http.Header
 		trailer http.Header
 		status  int
+		reason  edgekit.RejectionReason
 	}{
 		// Request targets.
 		{
@@ -58,105 +59,125 @@ func TestSecureDefaultsRejectBeforeMiddleware(t *testing.T) {
 			name:   "absolute form",
 			target: "http://upstream.test/api/x",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidRequestTarget,
 		},
 		{
 			name:   "absolute form with user information",
 			target: "http://user@upstream.test/api/x",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidRequestTarget,
 		},
 		{
 			name:   "asterisk form",
 			method: http.MethodOptions,
 			target: "*",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidRequestTarget,
 		},
 		{
 			name:   "opaque",
 			target: "urn:api:x",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidRequestTarget,
 		},
 		{
 			name:   "CONNECT",
 			method: http.MethodConnect,
 			target: "upstream.test:443",
 			status: http.StatusNotImplemented,
+			reason: edgekit.ReasonInvalidMethod,
 		},
 		{
 			name:   "CONNECT with path",
 			method: http.MethodConnect,
 			target: "/api/x",
 			status: http.StatusNotImplemented,
+			reason: edgekit.ReasonInvalidMethod,
 		},
 		// Path policy.
 		{
 			name:   "dot-dot segment",
 			target: "/api/../admin",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "dot segment",
 			target: "/api/./x",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "trailing dot-dot segment",
 			target: "/api/..",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "encoded dot-dot segment",
 			target: "/api/%2e%2e/admin",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "upper-case encoded dot",
 			target: "/api/%2E/x",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "half-encoded dot-dot segment",
 			target: "/api/.%2e/admin",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "encoded dot in a name",
 			target: "/api/file%2ejson",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "encoded slash",
 			target: "/api/a%2fb",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "upper-case encoded slash",
 			target: "/api/a%2Fb",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "encoded backslash",
 			target: "/api/a%5cb",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "backslash",
 			target: "/api/a\\b",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "encoded NUL",
 			target: "/api/a%00b",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "encoded number sign",
 			target: "/api/a%23b",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "number sign",
 			target: "/api/a#b",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidPath,
 		},
 		{
 			name:   "dots in a name",
@@ -183,11 +204,13 @@ func TestSecureDefaultsRejectBeforeMiddleware(t *testing.T) {
 			name:   "query semicolon",
 			target: "/api/x?a=1;b=2",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidQuery,
 		},
 		{
 			name:   "query with only a semicolon",
 			target: "/api/x?;",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidQuery,
 		},
 		{
 			name:   "encoded query semicolon",
@@ -203,31 +226,37 @@ func TestSecureDefaultsRejectBeforeMiddleware(t *testing.T) {
 			name:   "query percent at end",
 			target: "/api/x?a=%",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidQuery,
 		},
 		{
 			name:   "query percent with one digit",
 			target: "/api/x?a=%2",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidQuery,
 		},
 		{
 			name:   "query percent with non-hex digits",
 			target: "/api/x?b=hello%20world&bad=%zz&a=1",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidQuery,
 		},
 		{
 			name:   "query percent with one non-hex digit",
 			target: "/api/x?a=%2G",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidQuery,
 		},
 		{
 			name:   "malformed escape in query key",
 			target: "/api/x?%zz=1",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidQuery,
 		},
 		{
 			name:   "query with too many parameters",
 			target: "/api/x?" + strings.Repeat("a=1&", 10000) + "a=1",
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidQuery,
 		},
 		{
 			name:   "query with most parameters",
@@ -240,30 +269,35 @@ func TestSecureDefaultsRejectBeforeMiddleware(t *testing.T) {
 			target: "/api/x",
 			header: http.Header{"X_Forwarded_For": {"value"}},
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidHeaderName,
 		},
 		{
 			name:   "underscore name",
 			target: "/api/x",
 			header: http.Header{"X_Custom": {"value"}},
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidHeaderName,
 		},
 		{
 			name:   "dot in name",
 			target: "/api/x",
 			header: http.Header{"X.Custom": {"value"}},
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidHeaderName,
 		},
 		{
 			name:   "other token character",
 			target: "/api/x",
 			header: http.Header{"X-Custom~": {"value"}},
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidHeaderName,
 		},
 		{
 			name:   "empty name",
 			target: "/api/x",
 			header: http.Header{"": {"value"}},
 			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidHeaderName,
 		},
 		{
 			name:   "letters digits and dashes",
@@ -271,11 +305,59 @@ func TestSecureDefaultsRejectBeforeMiddleware(t *testing.T) {
 			header: http.Header{"X-Custom-2": {"value"}},
 			status: http.StatusOK,
 		},
+		// Upgrade values, with the predicate of ReverseProxy.
+		{
+			name:   "upgrade with tab",
+			target: "/api/x",
+			header: http.Header{"Connection": {"Upgrade"}, "Upgrade": {"web\tsocket"}},
+			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidUpgrade,
+		},
+		{
+			name:   "upgrade with non-ASCII byte",
+			target: "/api/x",
+			header: http.Header{"Connection": {"keep-alive, UPGRADE"}, "Upgrade": {"w\xe9bsocket"}},
+			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidUpgrade,
+		},
+		{
+			name:   "upgrade with DEL",
+			target: "/api/x",
+			header: http.Header{"Connection": {"upgrade"}, "Upgrade": {"echo\x7f"}},
+			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidUpgrade,
+		},
+		{
+			name:   "upgrade token after whitespace",
+			target: "/api/x",
+			header: http.Header{"Connection": {"close,\tupgrade "}, "Upgrade": {"echo\x00"}},
+			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidUpgrade,
+		},
+		{
+			name:   "printable upgrade",
+			target: "/api/x",
+			header: http.Header{"Connection": {"Upgrade"}, "Upgrade": {"websocket/13 ~!"}},
+			status: http.StatusOK,
+		},
+		{
+			name:   "upgrade without connection token",
+			target: "/api/x",
+			header: http.Header{"Connection": {"upgraded"}, "Upgrade": {"web\tsocket"}},
+			status: http.StatusOK,
+		},
+		{
+			name:   "only a later upgrade value is not printable",
+			target: "/api/x",
+			header: http.Header{"Connection": {"Upgrade"}, "Upgrade": {"echo", "web\tsocket"}},
+			status: http.StatusOK,
+		},
 		{
 			name:    "underscore trailer name",
 			target:  "/api/x",
 			trailer: http.Header{"X_User": nil},
 			status:  http.StatusBadRequest,
+			reason:  edgekit.ReasonInvalidHeaderName,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -304,8 +386,8 @@ func TestSecureDefaultsRejectBeforeMiddleware(t *testing.T) {
 				return
 			}
 
-			if w.Body.String() != http.StatusText(tc.status)+"\n" {
-				t.Errorf("body = %q, want only the status text", w.Body.String())
+			if want := problem(tc.status, tc.reason); w.Body.String() != want {
+				t.Errorf("body = %q, want %q", w.Body.String(), want)
 			}
 
 			entries, forwards := entered.Load()-beforeEntry, forwarded.Load()-beforeForward

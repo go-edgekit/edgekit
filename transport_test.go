@@ -241,8 +241,8 @@ func TestResponseHeaderTimeoutCancelsUpstream(t *testing.T) {
 	w := httptest.NewRecorder()
 	g.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/slow", nil))
 
-	if w.Code != http.StatusBadGateway || w.Body.String() != "Bad Gateway\n" {
-		t.Errorf("response = %d %q, want 502 without details", w.Code, w.Body.String())
+	if w.Code != http.StatusGatewayTimeout || w.Body.String() != problem(http.StatusGatewayTimeout, "") {
+		t.Errorf("response = %d %q, want 504 without details", w.Code, w.Body.String())
 	}
 
 	receive(t, canceled)
@@ -307,8 +307,8 @@ func TestHeaderTimeoutDoesNotLimitResponseStream(t *testing.T) {
 	}
 	_ = control.Body.Close()
 
-	if control.StatusCode != http.StatusBadGateway {
-		t.Fatalf("control request status = %d, want 502 from the timeout", control.StatusCode)
+	if control.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("control request status = %d, want 504 from the timeout", control.StatusCode)
 	}
 
 	close(release)
@@ -369,8 +369,9 @@ func TestCancellationWhileWaitingForConnectionPool(t *testing.T) {
 	receive(t, waiting)
 	cancelQueued()
 
-	if status := receive(t, queuedDone); status != http.StatusBadGateway {
-		t.Errorf("queued request status = %d, want 502", status)
+	// Both clients are gone when their requests fail (ADR-0023).
+	if status := receive(t, queuedDone); status != 499 {
+		t.Errorf("queued request status = %d, want 499", status)
 	}
 
 	if calls.Load() != 1 || connections.Load() != 1 {
@@ -379,8 +380,8 @@ func TestCancellationWhileWaitingForConnectionPool(t *testing.T) {
 
 	cancelFirst()
 
-	if status := receive(t, firstDone); status != http.StatusBadGateway {
-		t.Errorf("first request status = %d, want 502", status)
+	if status := receive(t, firstDone); status != 499 {
+		t.Errorf("first request status = %d, want 499", status)
 	}
 }
 
@@ -574,10 +575,10 @@ func TestUpstreamHeaderLimitBeforeResponseHooks(t *testing.T) {
 			defer upstream.Close()
 
 			var responses int
-			hooks := upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) error {
+			hooks := upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 				responses++
 
-				return nil
+				return nil, nil
 			})
 			completionHooks, completed := completions()
 			g := newGateway(t, edgekit.Config{
@@ -596,7 +597,7 @@ func TestUpstreamHeaderLimitBeforeResponseHooks(t *testing.T) {
 				c := receive(t, completed)
 
 				if path == "/api/large" {
-					if w.Code != http.StatusBadGateway || w.Body.String() != "Bad Gateway\n" || w.Header().Get("X-Large") != "" {
+					if w.Code != http.StatusBadGateway || w.Body.String() != problem(http.StatusBadGateway, "") || w.Header().Get("X-Large") != "" {
 						t.Errorf("%s: response = %d %q, X-Large %d bytes; want 502 without the header", path, w.Code, w.Body.String(), len(w.Header().Get("X-Large")))
 					}
 

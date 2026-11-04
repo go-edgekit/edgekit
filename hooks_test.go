@@ -12,26 +12,26 @@ import (
 )
 
 // requestReceivedFunc provides only the RequestReceived phase.
-type requestReceivedFunc func(context.Context, *edgekit.RequestContext, *http.Request) error
+type requestReceivedFunc func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error)
 
 // RequestReceived calls f.
-func (f requestReceivedFunc) RequestReceived(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) error {
+func (f requestReceivedFunc) RequestReceived(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
 	return f(ctx, rc, r)
 }
 
 // beforeUpstreamFunc provides only the BeforeUpstream phase.
-type beforeUpstreamFunc func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) error
+type beforeUpstreamFunc func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error)
 
 // BeforeUpstream calls f.
-func (f beforeUpstreamFunc) BeforeUpstream(ctx context.Context, rc *edgekit.RequestContext, out *edgekit.OutboundRequest) error {
+func (f beforeUpstreamFunc) BeforeUpstream(ctx context.Context, rc *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 	return f(ctx, rc, out)
 }
 
 // upstreamResponseFunc provides only the UpstreamResponse phase.
-type upstreamResponseFunc func(context.Context, *edgekit.RequestContext, *http.Response) error
+type upstreamResponseFunc func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error)
 
 // UpstreamResponse calls f.
-func (f upstreamResponseFunc) UpstreamResponse(ctx context.Context, rc *edgekit.RequestContext, resp *http.Response) error {
+func (f upstreamResponseFunc) UpstreamResponse(ctx context.Context, rc *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 	return f(ctx, rc, resp)
 }
 
@@ -45,34 +45,34 @@ func (f requestCompletedFunc) RequestCompleted(ctx context.Context, rc *edgekit.
 
 // testHooks provides all phases for tests that need a complete lifecycle.
 type testHooks struct {
-	received  func(context.Context, *edgekit.RequestContext, *http.Request) error
-	before    func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) error
-	response  func(context.Context, *edgekit.RequestContext, *http.Response) error
+	received  func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error)
+	before    func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error)
+	response  func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error)
 	completed func(context.Context, *edgekit.RequestContext, edgekit.Completion)
 }
 
 // RequestReceived calls h.received when it is set.
-func (h *testHooks) RequestReceived(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) error {
+func (h *testHooks) RequestReceived(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
 	if h.received == nil {
-		return nil
+		return nil, nil
 	}
 
 	return h.received(ctx, rc, r)
 }
 
 // BeforeUpstream calls h.before when it is set.
-func (h *testHooks) BeforeUpstream(ctx context.Context, rc *edgekit.RequestContext, out *edgekit.OutboundRequest) error {
+func (h *testHooks) BeforeUpstream(ctx context.Context, rc *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 	if h.before == nil {
-		return nil
+		return nil, nil
 	}
 
 	return h.before(ctx, rc, out)
 }
 
 // UpstreamResponse calls h.response when it is set.
-func (h *testHooks) UpstreamResponse(ctx context.Context, rc *edgekit.RequestContext, resp *http.Response) error {
+func (h *testHooks) UpstreamResponse(ctx context.Context, rc *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 	if h.response == nil {
-		return nil
+		return nil, nil
 	}
 
 	return h.response(ctx, rc, resp)
@@ -193,8 +193,8 @@ func TestOutboundHeaderCheckDoesNotDependOnHooks(t *testing.T) {
 				collector, completed := completions()
 				providers := []any{collector}
 				if withBefore {
-					providers = append(providers, beforeUpstreamFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) error {
-						return nil
+					providers = append(providers, beforeUpstreamFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+						return nil, nil
 					}))
 				}
 
@@ -236,7 +236,7 @@ func TestOutboundHeaderCheckDoesNotDependOnHooks(t *testing.T) {
 					return
 				}
 
-				if w.Code != http.StatusInternalServerError || w.Body.String() != "Internal Server Error\n" || calls != 0 {
+				if w.Code != http.StatusInternalServerError || w.Body.String() != problem(http.StatusInternalServerError, "") || calls != 0 {
 					t.Errorf("response = %d %q, transport calls = %d; want 500 without details and no call", w.Code, w.Body.String(), calls)
 				}
 

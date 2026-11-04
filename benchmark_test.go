@@ -31,14 +31,14 @@ func BenchmarkServeHTTP(b *testing.B) {
 // header rules after the hooks.
 func BenchmarkServeHTTPHooks(b *testing.B) {
 	benchmarkServeHTTP(b, []any{&testHooks{
-		received: func(context.Context, *edgekit.RequestContext, *http.Request) error {
-			return nil
+		received: func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			return nil, nil
 		},
-		before: func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) error {
-			return nil
+		before: func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+			return nil, nil
 		},
-		response: func(context.Context, *edgekit.RequestContext, *http.Response) error {
-			return nil
+		response: func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+			return nil, nil
 		},
 		completed: func(context.Context, *edgekit.RequestContext, edgekit.Completion) {},
 	}})

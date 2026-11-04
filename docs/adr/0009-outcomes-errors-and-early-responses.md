@@ -81,3 +81,5 @@ Preserve tests distinguishing upstream HTTP errors from proxy execution errors a
 **Amended 2026-11-03:** [ADR-0018](0018-completion-observes-gateway-rejections.md) extends the completion guarantee to rejections by the secure defaults, and adds the rejection reason as an execution fact, including `no_route` for a routing miss. [ADR-0017](0017-failure-status-by-source.md) sets the status of a failure by its source.
 
 **Note 2026-11-04:** Completion gives the first failure with its phase (`Failure`, `Phase`), with an unknown phase where the source is not known. This is the structured failure provenance that the decision calls for.
+
+**Note 2026-11-04:** [ADR-0022](0022-rejections-and-the-problem-response.md) and [ADR-0023](0023-failure-evidence-and-transport-facts.md) implement the typed rejection, the renderer, and the failure evidence. The core never renders after the final response headers are committed.

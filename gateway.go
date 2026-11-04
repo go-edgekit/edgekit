@@ -66,6 +66,11 @@ type Config struct {
 	// digits, and "-". Hop-by-hop, framing, and Host headers are not permitted.
 	// Extensions can also declare their managed headers with [HeaderOwner].
 	ManagedHeaders []string
+
+	// Renderer makes the body of the responses that the gateway makes itself,
+	// for rejections and failures. If it is nil, the gateway writes a minimal
+	// RFC 9457 problem document (see [Renderer]).
+	Renderer Renderer
 }
 
 // Route is a match on the inbound request path. It sets the upstream selector
@@ -135,22 +140,54 @@ type Route struct {
 // panic in a hook or in middleware continues after completion ran. The
 // gateway does not recover it.
 //
-// # Failures
+// # Rejections and failures
 //
-// The gateway sends these statuses when handling fails, with a body that
-// contains only the status text:
+// A processing hook can reject a request with a [Rejection]: the gateway
+// sends its status and headers. The gateway also rejects requests
+// itself: with the secure defaults (see below), and with 404 Not Found when
+// no route matches.
 //
-//   - 500 Internal Server Error for an error from a hook, from the upstream
-//     selector, or for a selected URL that does not obey the contract of
-//     [UpstreamSelector]. 500 also when middleware does not derive its
-//     context from the request context, so the gateway context is lost.
-//   - 502 Bad Gateway when the round trip to the upstream fails, such as for
-//     a connection failure, a timeout, or response headers that are too
-//     large.
+// The source of a failure sets the status (ADR-0017, ADR-0023). The first
+// rule that applies counts:
 //
-// Completion gets the failure, with its phase, as a [Failure]. For a lost
-// gateway context, completion gets no Failure, because the stage that finds
-// the loss cannot get to the gateway context.
+//   - 499 when the error wraps [context.Canceled] and the context that the
+//     gateway got with the request is canceled: the client is gone. This
+//     applies to hooks, the upstream selector, the round trip, and the
+//     protocol switch. A canceled context alone does not change the status
+//     of another error.
+//   - 504 Gateway Timeout when the round trip fails with a [net.Error] whose
+//     Timeout method returns true, such as a dial, TLS-handshake, or
+//     response-header timeout, or [context.DeadlineExceeded].
+//   - 503 Service Unavailable when the upstream selector returns an error that
+//     wraps [ErrNoUpstreamAvailable].
+//   - 502 Bad Gateway when an [UpstreamResponseHook] hook returns an error
+//     that wraps [ErrInvalidUpstreamResponse].
+//   - 500 Internal Server Error for another error from a hook or from the
+//     upstream selector, for a selected URL that does not obey the contract
+//     of [UpstreamSelector], for an invalid outbound header (see below), for
+//     a [Rejection] that is not valid, and for a defect of the embedder in a
+//     protocol switch: a 101 response body that cannot be written, or a
+//     response writer that cannot hijack the connection. 500 also when
+//     middleware does not derive its context from the request context, so
+//     the gateway context is lost.
+//   - 502 Bad Gateway for another failure of the round trip, such as a
+//     connection failure or response headers that are too large, and for a
+//     failure without a known source, such as an upstream that does not
+//     accept a protocol switch.
+//
+// The gateway never reads the text of an error. A [Renderer] makes the body
+// of these responses; it gets no failure details. The gateway does not send
+// such a response after the final response headers are committed, such as
+// when the response body fails while it streams, or after the hijack of the
+// connection for a protocol switch. It also sends none when the connection is
+// hijacked already ([net/http.ErrHijacked]), because another component owns
+// it; completion still gets the failure.
+//
+// Completion gets the failure, with its phase, as a [Failure], and the
+// transport facts [Completion.ConnectionObtained] and
+// [Completion.RequestWritten]. For a lost gateway context, completion gets no
+// Failure, because the stage that finds the loss cannot get to the gateway
+// context.
 //
 // # Secure defaults
 //
@@ -168,6 +205,8 @@ type Route struct {
 //     the upstream.
 //   - Header and trailer names with characters other than ASCII letters,
 //     digits, and "-", with 400 Bad Request.
+//   - A Connection header with the token "upgrade" and an Upgrade value
+//     that is not printable ASCII, with 400 Bad Request.
 //
 // The gateway removes these headers from the inbound request before any
 // middleware runs:
@@ -266,6 +305,7 @@ type Gateway struct {
 	hooks          hooks
 	managedHeaders map[string]struct{}
 	ownedTransport *http.Transport
+	renderer       Renderer
 }
 
 // route is a validated route with its compiled handler.
@@ -294,7 +334,12 @@ var lostContextLog = safelog.New("gateway_context_lost")
 // the handlers that they return. New does not change process-wide state, such
 // as the default logger.
 func New(cfg Config) (*Gateway, error) {
-	g := &Gateway{}
+	g := &Gateway{
+		renderer: cfg.Renderer,
+	}
+	if g.renderer == nil {
+		g.renderer = renderProblem
+	}
 
 	var problems []error
 	g.hooks, g.managedHeaders, problems = checkConfig(cfg)
@@ -324,6 +369,7 @@ func New(cfg Config) (*Gateway, error) {
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rc := &RequestContext{
 		start: time.Now(),
+		entry: r.Context(),
 	}
 	ctx := context.WithValue(r.Context(), requestContextKey{}, rc)
 
@@ -333,8 +379,8 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	if status, reason := checkRequest(r); status != 0 {
-		rc.rejection = reason
-		reject(w, status)
+		rc.reject(status, reason, nil)
+		g.respond(ctx, w, rc)
 		returned = true
 
 		return
@@ -355,9 +401,9 @@ func (g *Gateway) complete(ctx context.Context, rc *RequestContext, aborted bool
 	defer rc.end()
 
 	if len(g.hooks.completed) != 0 {
-		duration := time.Since(rc.start)
+		snapshot := rc.completion(time.Since(rc.start), aborted)
 		for _, hook := range g.hooks.completed {
-			hook.RequestCompleted(ctx, rc, rc.completion(duration, aborted))
+			hook.RequestCompleted(ctx, rc, copyCompletion(snapshot))
 		}
 	}
 }
@@ -379,7 +425,7 @@ func (g *Gateway) buildHandler(cfg Config, proxy *httputil.ReverseProxy) (http.H
 
 	routes := make([]route, 0, len(cfg.Routes))
 	for i, r := range cfg.Routes {
-		handler, err := chain(forward(proxy, r.Upstream), r.Middleware)
+		handler, err := chain(g.forward(proxy, r.Upstream), r.Middleware)
 		if err != nil {
 			problems = append(problems, invalid("route %d: %w", i, err))
 
@@ -409,15 +455,15 @@ func (g *Gateway) buildHandler(cfg Config, proxy *httputil.ReverseProxy) (http.H
 // prefix matches, so routes must be sorted with the longest prefix first.
 func (g *Gateway) router(routes []route) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rc, ok := requestContext(w, r)
+		rc, ok := g.requestContext(w, r)
 		if !ok {
 			return
 		}
 
 		for _, hook := range g.hooks.received {
-			if err := hook.RequestReceived(r.Context(), rc, r); err != nil {
-				rc.fail(PhaseRequestReceived, err)
-				reject(w, http.StatusInternalServerError)
+			rejection, err := hook.RequestReceived(r.Context(), rc, r)
+			if rc.hookResult(PhaseRequestReceived, rejection, err) != nil {
+				g.respond(r.Context(), w, rc)
 
 				return
 			}
@@ -433,18 +479,20 @@ func (g *Gateway) router(routes []route) http.Handler {
 			}
 		}
 
-		rc.rejection = ReasonNoRoute
-		reject(w, http.StatusNotFound)
+		rc.reject(http.StatusNotFound, ReasonNoRoute, nil)
+		g.respond(r.Context(), w, rc)
 	})
 }
 
 // requestContext fails closed when middleware did not derive its context from
 // the request context: it sends 500 and reports false.
-func requestContext(w http.ResponseWriter, r *http.Request) (*RequestContext, bool) {
+func (g *Gateway) requestContext(w http.ResponseWriter, r *http.Request) (*RequestContext, bool) {
 	rc, ok := FromContext(r.Context())
 	if !ok {
 		lostContextLog.Print("lost")
-		reject(w, http.StatusInternalServerError)
+		g.writeProblem(r.Context(), w, Problem{
+			Status: http.StatusInternalServerError,
+		}, nil)
 	}
 
 	return rc, ok

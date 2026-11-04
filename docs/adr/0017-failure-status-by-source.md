@@ -45,3 +45,7 @@ All failure responses have a generic body: the status text, without failure deta
 ## Validation / follow-up
 
 Tests verify 500 for each processing-hook phase and for selector failures, and 502 for round-trip failures, also with a configured transport. Each typed signal needs tests that show that its status comes from the type, not from error text.
+
+**Superseded in part 2026-11-04:** [ADR-0022](0022-rejections-and-the-problem-response.md) replaces the status-text body with the `problem+json` body of ADR-0013, whose `title` is the status text.
+
+**Refined 2026-11-04:** [ADR-0023](0023-failure-evidence-and-transport-facts.md) defines the evidence for 499, 503, 504, and 502 and their precedence. A typed timeout in the round trip gives 504 without a write fact, and a client cancellation gives 499 in each processing stage. The protocol-switch failures get a phase and a status.

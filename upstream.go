@@ -33,9 +33,19 @@ import (
 //     failure is not in the upstream. It does not send the error text to the
 //     client. Completion gets the error as a [Failure] in
 //     [PhaseUpstreamSelection].
+//   - Return an error that wraps [ErrNoUpstreamAvailable] when no upstream
+//     can take the request. The gateway then sends 503 Service Unavailable.
+//     An error that wraps [context.Canceled] while the client is gone gives
+//     499 (see [Gateway]).
 type UpstreamSelector interface {
 	SelectUpstream(r *http.Request) (*url.URL, error)
 }
+
+// ErrNoUpstreamAvailable is the error that an [UpstreamSelector] wraps when no
+// upstream can take the request, such as when all upstreams are down. The
+// gateway then sends 503 Service Unavailable. In another phase, it has no
+// effect on the status. Use [errors.Is] to identify it.
+var ErrNoUpstreamAvailable = errors.New("no upstream available")
 
 // UpstreamSelectorFunc is an adapter to use an ordinary function as an
 // [UpstreamSelector], as [http.HandlerFunc] is for [http.Handler]. The

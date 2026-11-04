@@ -71,7 +71,7 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 	)
 
 	first := &testHooks{
-		received: func(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) error {
+		received: func(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
 			contexts = append(contexts, contextObservation{
 				phase: "RequestReceived",
 				ctx:   ctx,
@@ -91,9 +91,9 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 
 			steps = append(steps, "received:first")
 
-			return nil
+			return nil, nil
 		},
-		before: func(ctx context.Context, rc *edgekit.RequestContext, out *edgekit.OutboundRequest) error {
+		before: func(ctx context.Context, rc *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 			contexts = append(contexts, contextObservation{
 				phase: "BeforeUpstream",
 				ctx:   ctx,
@@ -115,9 +115,9 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 			out.Header().Set("X-Outbound", "first")
 			steps = append(steps, "before:first")
 
-			return nil
+			return nil, nil
 		},
-		response: func(ctx context.Context, rc *edgekit.RequestContext, resp *http.Response) error {
+		response: func(ctx context.Context, rc *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 			contexts = append(contexts, contextObservation{
 				phase: "UpstreamResponse",
 				ctx:   ctx,
@@ -143,7 +143,7 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 
 			steps = append(steps, "response:first")
 
-			return nil
+			return nil, nil
 		},
 		completed: func(ctx context.Context, rc *edgekit.RequestContext, c edgekit.Completion) {
 			contexts = append(contexts, contextObservation{
@@ -175,25 +175,25 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 		},
 	}
 	second := &testHooks{
-		received: func(context.Context, *edgekit.RequestContext, *http.Request) error {
+		received: func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 			steps = append(steps, "received:second")
 
-			return nil
+			return nil, nil
 		},
-		before: func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) error {
+		before: func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 			if out.Header().Get("X-Outbound") != "first" {
 				t.Error("BeforeUpstream hooks ran out of order")
 			}
 
 			steps = append(steps, "before:second")
 
-			return nil
+			return nil, nil
 		},
-		response: func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) error {
+		response: func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 			resp.Header.Set("X-Upstream", "modified")
 			steps = append(steps, "response:second")
 
-			return nil
+			return nil, nil
 		},
 		completed: func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
 			// Each hook gets its own snapshot, so the change must not reach
@@ -347,20 +347,20 @@ func TestCompletionOnEarlyExits(t *testing.T) {
 				stateAtCompletion        string
 			)
 			hooks := &testHooks{
-				received: func(context.Context, *edgekit.RequestContext, *http.Request) error {
+				received: func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 					received = true
 
-					return tc.hookErr
+					return nil, tc.hookErr
 				},
-				before: func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) error {
+				before: func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 					later = true
 
-					return nil
+					return nil, nil
 				},
-				response: func(context.Context, *edgekit.RequestContext, *http.Response) error {
+				response: func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 					later = true
 
-					return nil
+					return nil, nil
 				},
 				completed: func(_ context.Context, rc *edgekit.RequestContext, c edgekit.Completion) {
 					if !unwound {
@@ -449,20 +449,20 @@ func TestSecureDefaultRejectionReachesCompletion(t *testing.T) {
 	hooks, completed := completions()
 	var processing atomic.Int32
 	processingHooks := &testHooks{
-		received: func(context.Context, *edgekit.RequestContext, *http.Request) error {
+		received: func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 			processing.Add(1)
 
-			return nil
+			return nil, nil
 		},
-		before: func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) error {
+		before: func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 			processing.Add(1)
 
-			return nil
+			return nil, nil
 		},
-		response: func(context.Context, *edgekit.RequestContext, *http.Response) error {
+		response: func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 			processing.Add(1)
 
-			return nil
+			return nil, nil
 		},
 	}
 	var startTimes, routes, upstreams, states []bool
@@ -610,33 +610,33 @@ func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
 			)
 			switch tc.phase {
 			case edgekit.PhaseRequestReceived:
-				first = requestReceivedFunc(func(context.Context, *edgekit.RequestContext, *http.Request) error {
-					return fmt.Errorf("lookup: %w", secret)
+				first = requestReceivedFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+					return nil, fmt.Errorf("lookup: %w", secret)
 				})
 			case edgekit.PhaseBeforeUpstream:
-				first = beforeUpstreamFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) error {
-					return fmt.Errorf("sign: %w", secret)
+				first = beforeUpstreamFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+					return nil, fmt.Errorf("sign: %w", secret)
 				})
 			default:
-				first = upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) error {
-					return fmt.Errorf("inspect: %w", secret)
+				first = upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+					return nil, fmt.Errorf("inspect: %w", secret)
 				})
 			}
 			second := &testHooks{}
-			second.received = func(context.Context, *edgekit.RequestContext, *http.Request) error {
+			second.received = func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 				laterRan = append(laterRan, "received")
 
-				return nil
+				return nil, nil
 			}
-			second.before = func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) error {
+			second.before = func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 				laterRan = append(laterRan, "before")
 
-				return nil
+				return nil, nil
 			}
-			second.response = func(context.Context, *edgekit.RequestContext, *http.Response) error {
+			second.response = func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 				laterRan = append(laterRan, "response")
 
-				return nil
+				return nil, nil
 			}
 			hooks, completed := completions()
 
@@ -659,7 +659,7 @@ func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
 			w := httptest.NewRecorder()
 			g.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/x", nil))
 
-			if w.Code != http.StatusInternalServerError || w.Body.String() != "Internal Server Error\n" {
+			if w.Code != http.StatusInternalServerError || w.Body.String() != problem(http.StatusInternalServerError, "") {
 				t.Errorf("response = %d %q, want 500 without details", w.Code, w.Body.String())
 			}
 
@@ -699,7 +699,7 @@ func TestTransportErrorReachesCompletion(t *testing.T) {
 	w := httptest.NewRecorder()
 	g.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/x", nil))
 
-	if w.Code != http.StatusBadGateway || w.Body.String() != "Bad Gateway\n" {
+	if w.Code != http.StatusBadGateway || w.Body.String() != problem(http.StatusBadGateway, "") {
 		t.Errorf("response = %d %q, want 502 without details", w.Code, w.Body.String())
 	}
 
@@ -837,12 +837,12 @@ func (e *tagExtension) Middleware(next http.Handler) http.Handler {
 }
 
 // UpstreamResponse adds the tag from the request state to the response.
-func (e *tagExtension) UpstreamResponse(_ context.Context, rc *edgekit.RequestContext, resp *http.Response) error {
+func (e *tagExtension) UpstreamResponse(_ context.Context, rc *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 	if tag, ok := edgekit.State(rc, tagKey); ok {
 		resp.Header.Set("X-Request-Tag", tag)
 	}
 
-	return nil
+	return nil, nil
 }
 
 // RequestCompleted records the tag and the completion.
@@ -1020,10 +1020,10 @@ func TestStateIsDroppedAfterCompletion(t *testing.T) {
 	key := edgekit.NewStateKey[string]()
 	var kept *edgekit.RequestContext
 	hooks := &testHooks{
-		received: func(_ context.Context, rc *edgekit.RequestContext, _ *http.Request) error {
+		received: func(_ context.Context, rc *edgekit.RequestContext, _ *http.Request) (*edgekit.Rejection, error) {
 			edgekit.SetState(rc, key, "value")
 
-			return nil
+			return nil, nil
 		},
 		completed: func(_ context.Context, rc *edgekit.RequestContext, _ edgekit.Completion) {
 			kept = rc
@@ -1053,10 +1053,10 @@ func TestStateIsDroppedWhenACompletionHookPanics(t *testing.T) {
 	key := edgekit.NewStateKey[string]()
 	var kept *edgekit.RequestContext
 	hooks := &testHooks{
-		received: func(_ context.Context, rc *edgekit.RequestContext, _ *http.Request) error {
+		received: func(_ context.Context, rc *edgekit.RequestContext, _ *http.Request) (*edgekit.Rejection, error) {
 			edgekit.SetState(rc, key, "value")
 
-			return nil
+			return nil, nil
 		},
 		completed: func(_ context.Context, rc *edgekit.RequestContext, _ edgekit.Completion) {
 			kept = rc
@@ -1093,10 +1093,10 @@ func TestConcurrentRequestStateIsolation(t *testing.T) {
 		seen = make(map[string]int)
 	)
 	hooks := &testHooks{
-		received: func(_ context.Context, rc *edgekit.RequestContext, r *http.Request) error {
+		received: func(_ context.Context, rc *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
 			edgekit.SetState(rc, key, r.Header.Get("X-Test-Request"))
 
-			return nil
+			return nil, nil
 		},
 		completed: func(_ context.Context, rc *edgekit.RequestContext, _ edgekit.Completion) {
 			value, _ := edgekit.State(rc, key)
@@ -1140,8 +1140,8 @@ func TestCancellationReachesHooks(t *testing.T) {
 
 	var completionErr error
 	hooks := &testHooks{
-		received: func(ctx context.Context, _ *edgekit.RequestContext, _ *http.Request) error {
-			return ctx.Err()
+		received: func(ctx context.Context, _ *edgekit.RequestContext, _ *http.Request) (*edgekit.Rejection, error) {
+			return nil, ctx.Err()
 		},
 		completed: func(ctx context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
 			completionErr = ctx.Err()
@@ -1165,8 +1165,10 @@ func TestCancellationReachesHooks(t *testing.T) {
 		t.Errorf("completion context error = %v, want context.Canceled", completionErr)
 	}
 
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want 500", w.Code)
+	// The hook reports the cancellation and the client is gone, so the
+	// failure is not an extension defect (ADR-0023).
+	if w.Code != 499 {
+		t.Errorf("status = %d, want 499", w.Code)
 	}
 }
 
@@ -1176,13 +1178,13 @@ func TestCompletionOnOutboundPanic(t *testing.T) {
 		roundTrips           atomic.Int32
 	)
 	hooks := &testHooks{
-		before: func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) error {
+		before: func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 			panic("signing panic")
 		},
-		response: func(context.Context, *edgekit.RequestContext, *http.Response) error {
+		response: func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 			responseRan = true
 
-			return nil
+			return nil, nil
 		},
 	}
 	completionHooks, completed := completions()
@@ -1270,7 +1272,7 @@ func TestMissingGatewayContextFailsClosed(t *testing.T) {
 			w := httptest.NewRecorder()
 			g.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/x", nil))
 
-			if w.Code != http.StatusInternalServerError || w.Body.String() != "Internal Server Error\n" || requests.Load() != 0 {
+			if w.Code != http.StatusInternalServerError || w.Body.String() != problem(http.StatusInternalServerError, "") || requests.Load() != 0 {
 				t.Errorf("response = %d %q, upstream requests = %d; want 500 without details and no request", w.Code, w.Body.String(), requests.Load())
 			}
 
@@ -1437,8 +1439,8 @@ func TestResponseHeaderTimeoutReachesCompletion(t *testing.T) {
 	w := httptest.NewRecorder()
 	g.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/slow", nil))
 
-	if w.Code != http.StatusBadGateway || w.Body.String() != "Bad Gateway\n" {
-		t.Errorf("response = %d %q, want 502 without details", w.Code, w.Body.String())
+	if w.Code != http.StatusGatewayTimeout || w.Body.String() != problem(http.StatusGatewayTimeout, "") {
+		t.Errorf("response = %d %q, want 504 without details", w.Code, w.Body.String())
 	}
 
 	var timeout net.Error
