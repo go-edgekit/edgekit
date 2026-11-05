@@ -124,6 +124,13 @@ linters:
         linters:
           - godoclint
           - noctx
+      # ADR-0022: processing hooks return (*Rejection, error), and nil, nil
+      # means that handling continues, as a nil result of the callback
+      # http.Transport.Proxy means no proxy. Core code keeps the check. Add the
+      # path of an extension package here when it implements a processing hook.
+      - path: _test\.go
+        linters:
+          - nilnil
 
 formatters:
   enable:

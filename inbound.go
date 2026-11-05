@@ -55,6 +55,8 @@ func checkRequest(r *http.Request) (int, RejectionReason) {
 		return http.StatusBadRequest, ReasonInvalidQuery
 	case !headerNamesAllowed(r.Header), !headerNamesAllowed(r.Trailer):
 		return http.StatusBadRequest, ReasonInvalidHeaderName
+	case !upgradeAllowed(r.Header):
+		return http.StatusBadRequest, ReasonInvalidUpgrade
 	}
 
 	return 0, ""
@@ -111,6 +113,35 @@ func queryAllowed(raw string) bool {
 	_, err := url.ParseQuery(raw)
 
 	return err == nil
+}
+
+// upgradeAllowed uses the predicate of ReverseProxy, which fails a request
+// with a Connection token "upgrade" and an Upgrade value that is not
+// printable ASCII, and reports that failure without a source.
+func upgradeAllowed(header http.Header) bool {
+	// ReverseProxy reads only the canonical names, and only the first
+	// Upgrade value.
+	upgrade := false
+	for _, value := range header["Connection"] {
+		for token := range strings.SplitSeq(value, ",") {
+			if strings.EqualFold(strings.Trim(token, " \t"), "upgrade") {
+				upgrade = true
+			}
+		}
+	}
+
+	if !upgrade {
+		return true
+	}
+
+	value := header.Get("Upgrade")
+	for i := range len(value) {
+		if value[i] < ' ' || value[i] > '~' {
+			return false
+		}
+	}
+
+	return true
 }
 
 // isHex reports whether c is a hexadecimal digit.

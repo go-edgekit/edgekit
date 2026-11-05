@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -61,7 +63,7 @@ func ExampleNew() {
 
 	// Output:
 	// /api/users: 200 upstream response
-	// /admin: 404 Not Found
+	// /admin: 404 {"type":"about:blank","title":"Not Found","status":404,"reason":"no_route"}
 }
 
 // regionSelector selects the upstream for the region that route middleware
@@ -132,7 +134,7 @@ func ExampleUpstreamSelector() {
 	// Output:
 	// 200 served in eu
 	// 200 served in us
-	// 500 Internal Server Error
+	// 500 {"type":"about:blank","title":"Internal Server Error","status":500}
 }
 
 func ExampleUpstreamSelectorFunc() {
@@ -230,12 +232,12 @@ type signer struct {
 
 // BeforeUpstream signs the method and the rewritten request target, and sends
 // the signature in X-Signature.
-func (s signer) BeforeUpstream(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) error {
+func (s signer) BeforeUpstream(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 	mac := hmac.New(sha256.New, s.key)
 	_, _ = io.WriteString(mac, out.Method()+" "+out.Host()+out.URL().RequestURI())
 	out.Header().Set("X-Signature", hex.EncodeToString(mac.Sum(nil))[:16])
 
-	return nil
+	return nil, nil
 }
 
 func ExampleBeforeUpstreamHook() {
@@ -365,4 +367,124 @@ func ExampleSetState() {
 	// req-1: route "/api/", rejection "", failure false
 	// req-2: route "", rejection "no_route", failure false
 	// no ID: route "", rejection "invalid_path", failure false
+}
+
+// apiKeys rejects requests without an API key. A real extension would also
+// check the key.
+type apiKeys struct{}
+
+// missingKey is shared by all requests. Nobody changes it or its header map.
+var missingKey = edgekit.Rejection{
+	Status: http.StatusUnauthorized,
+	Reason: "apikey.missing",
+	Header: http.Header{
+		"Www-Authenticate": {`ApiKey realm="api"`},
+	},
+}
+
+// RequestReceived rejects a request without the X-Api-Key header. A failure,
+// such as a key store that is down, would be the error result instead.
+func (apiKeys) RequestReceived(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
+	if r.Header.Get("X-Api-Key") == "" {
+		return &missingKey, nil
+	}
+
+	return nil, nil
+}
+
+func ExampleRejection() {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "upstream response")
+	}))
+	defer upstream.Close()
+
+	selector, err := edgekit.StaticUpstream(&url.URL{
+		Scheme: "http",
+		Host:   upstream.Listener.Addr().String(),
+	})
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	gateway, err := edgekit.New(edgekit.Config{
+		Routes: []edgekit.Route{{
+			Prefix:   "/api/",
+			Upstream: selector,
+		}},
+		Hooks: []any{apiKeys{}},
+	})
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+	defer gateway.CloseIdleConnections()
+
+	w := httptest.NewRecorder()
+	gateway.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/users", nil))
+	fmt.Println(w.Code, w.Header().Get("WWW-Authenticate"))
+	fmt.Println(w.Header().Get("Content-Type"))
+	fmt.Println(w.Body.String())
+
+	// Output:
+	// 401 ApiKey realm="api"
+	// application/problem+json
+	// {"type":"about:blank","title":"Unauthorized","status":401,"reason":"apikey.missing"}
+}
+
+func ExampleRenderer() {
+	// This renderer writes JSON:API error documents instead of RFC 9457
+	// problem documents. It gets only the status and the rejection reason,
+	// never the failure details.
+	jsonAPI := func(_ context.Context, p edgekit.Problem) (string, []byte) {
+		type errorObject struct {
+			Status string `json:"status"`
+			Code   string `json:"code,omitempty"`
+			Title  string `json:"title,omitempty"`
+		}
+
+		body, err := json.Marshal(map[string][]errorObject{
+			"errors": {{
+				Status: strconv.Itoa(p.Status),
+				Code:   string(p.Reason),
+				Title:  http.StatusText(p.Status),
+			}},
+		})
+		if err != nil {
+			// The gateway then uses its default renderer.
+			return "", nil
+		}
+
+		return "application/vnd.api+json", body
+	}
+
+	selector := edgekit.UpstreamSelectorFunc(func(*http.Request) (*url.URL, error) {
+		return nil, fmt.Errorf("discovery: %w", edgekit.ErrNoUpstreamAvailable)
+	})
+
+	gateway, err := edgekit.New(edgekit.Config{
+		Routes: []edgekit.Route{{
+			Prefix:   "/api/",
+			Upstream: selector,
+		}},
+		Renderer: jsonAPI,
+	})
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+	defer gateway.CloseIdleConnections()
+
+	for _, path := range []string{"/api/users", "/admin"} {
+		w := httptest.NewRecorder()
+		gateway.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		fmt.Println(w.Code, w.Header().Get("Content-Type"), w.Body.String())
+	}
+
+	// Output:
+	// 503 application/vnd.api+json {"errors":[{"status":"503","title":"Service Unavailable"}]}
+	// 404 application/vnd.api+json {"errors":[{"status":"404","code":"no_route","title":"Not Found"}]}
 }

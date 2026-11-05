@@ -19,16 +19,18 @@ Acceptance does not freeze precise Go interfaces or mean every preferred extensi
 | [0009](0009-outcomes-errors-and-early-responses.md) | Accepted (amended by 0013, 0018) | Outcome semantics | Core execution facts, middleware HTTP observations, extension interpretations; completion is not delivery |
 | [0010](0010-scaffold-hardening-and-verification.md) | Superseded by 0012 | Verification | Test correctness/security boundaries, without claiming production readiness |
 | [0011](0011-library-first-gateway-framework.md) | Accepted | Project direction | Library-first core with correctness and hardening; business policy in unprivileged bundled extensions |
-| [0012](0012-secure-defaults-and-configurable-protections.md) | Accepted (refined by 0017) | Protections | Secure defaults on; deployment-dependent protections provided but off until configured |
-| [0013](0013-typed-rejections-and-replaceable-renderer.md) | Accepted | Rejections | Rejections carry headers; replaceable renderer with a `problem+json` default |
+| [0012](0012-secure-defaults-and-configurable-protections.md) | Accepted (refined by 0017, 0023) | Protections | Secure defaults on; deployment-dependent protections provided but off until configured |
+| [0013](0013-typed-rejections-and-replaceable-renderer.md) | Accepted (amended by 0022) | Rejections | Rejections carry headers; replaceable renderer with a `problem+json` default |
 | [0014](0014-multi-module-repository.md) | Accepted | Modules | Dependency-light core; bundled extensions with dependencies get their own modules |
 | [0015](0015-access-policy-model.md) | Accepted | Access policy | Limits per subject, evaluated independently, consumed at admission |
 | [0016](0016-core-owns-the-inbound-server.md) | Accepted | Serving edge | The core provides the hardened server; a bare handler loses server-level protections |
-| [0017](0017-failure-status-by-source.md) | Accepted | Failure statuses | The source of a failure sets the status: 500 for extension code, 502 for the upstream round trip |
-| [0018](0018-completion-observes-gateway-rejections.md) | Accepted | Completion boundary | Completion observes gateway-owned rejections with a public reason code and no request content |
+| [0017](0017-failure-status-by-source.md) | Accepted (superseded in part by 0022, refined by 0023) | Failure statuses | The source of a failure sets the status: 500 for extension code, 502 for the upstream round trip |
+| [0018](0018-completion-observes-gateway-rejections.md) | Accepted (amended by 0022, 0023) | Completion boundary | Completion observes gateway-owned rejections with a public reason code and no request content |
 | [0019](0019-hook-outputs-and-destination-ownership.md) | Accepted | Hook outputs | Hooks cannot change the destination; the core sanitizes header maps after hooks |
 | [0020](0020-route-prefix-matching-without-redirects.md) | Accepted | Route matching | Escaped, case-sensitive, longest prefix match; no trailing-slash redirects |
 | [0021](0021-hook-order-by-provider-position.md) | Accepted | Hook order | The first hook provider is the outermost one; response phases run in reverse order |
+| [0022](0022-rejections-and-the-problem-response.md) | Accepted | Rejections and renderer | Processing hooks return `(*Rejection, error)` with `<extension>.<check>` codes, and an error always wins; a body-only renderer with a minimal `problem+json` default |
+| [0023](0023-failure-evidence-and-transport-facts.md) | Accepted | Failure evidence | 499 and 504 from typed errors and the client context; transport trace facts; protocol-switch failures; no response on a connection that another component hijacked |
 
 ## Decision process
 
@@ -42,7 +44,7 @@ Do not silently change the rationale of accepted ADRs. Write a new ADR to supers
 ## Remaining provisional APIs and deferred work
 
 1. Go hook signatures, the `Config.Hooks` registration, and function adapters (ADR-0003). Four hook interfaces exist, without function adapters. The API stays provisional until v1.
-2. Typed rejections and typed failures (ADR-0009, ADR-0013, R10). `Completion` gives the first failure with its phase, and the rejection reason, whose type stays stable when typed rejections exist (ADR-0018).
+2. Typed rejections and typed failures (ADR-0022 and ADR-0023). The `(*Rejection, error)` hook results, `Renderer`, `Problem`, the failure sentinels including `ErrInvalidRejection`, and the transport facts in `Completion`. R10 is covered in part: a typed dial failure needs a dialer that the core owns (ADR-0023).
 3. State-key API (ADR-0005): `NewStateKey`, `SetState`, and `State`. Asynchronous middleware requires revisiting the lifecycle contract.
 4. Route-specific hook registration (ADR-0004, roadmap section 3). Route middleware entering before route-matched hooks, registration-order hook execution, and outer completion are accepted.
 5. Dedicated route-matched hooks (ADR-0003). These remain deferred until a test needs them.

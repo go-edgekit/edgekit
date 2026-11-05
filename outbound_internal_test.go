@@ -10,10 +10,10 @@ import (
 )
 
 // beforeUpstreamFunc is a BeforeUpstreamHook made from a function.
-type beforeUpstreamFunc func(context.Context, *RequestContext, *OutboundRequest) error
+type beforeUpstreamFunc func(context.Context, *RequestContext, *OutboundRequest) (*Rejection, error)
 
 // BeforeUpstream calls f.
-func (f beforeUpstreamFunc) BeforeUpstream(ctx context.Context, rc *RequestContext, out *OutboundRequest) error {
+func (f beforeUpstreamFunc) BeforeUpstream(ctx context.Context, rc *RequestContext, out *OutboundRequest) (*Rejection, error) {
 	return f(ctx, rc, out)
 }
 
@@ -44,16 +44,42 @@ func (b *countingBody) Close() error {
 // no visible effect, so only a direct call can show that the transport closes
 // the body that it gets.
 func TestOutboundFailureClosesBodyWithoutDelegating(t *testing.T) {
+	failure := errors.New("signing failed")
+
 	for _, tc := range []struct {
-		name     string
-		withBody bool
+		name      string
+		withBody  bool
+		rejection *Rejection
+		hookErr   error
+		wantErr   error
 	}{
 		{
-			name: "no body",
+			name:    "no body",
+			hookErr: failure,
+			wantErr: failure,
 		},
 		{
 			name:     "body",
 			withBody: true,
+			hookErr:  failure,
+			wantErr:  failure,
+		},
+		{
+			name: "invalid rejection without body",
+			rejection: &Rejection{
+				Status: http.StatusOK,
+				Reason: "acl.denied",
+			},
+			wantErr: ErrInvalidRejection,
+		},
+		{
+			name:     "invalid rejection with body",
+			withBody: true,
+			rejection: &Rejection{
+				Status: http.StatusOK,
+				Reason: "acl.denied",
+			},
+			wantErr: ErrInvalidRejection,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -71,17 +97,16 @@ func TestOutboundFailureClosesBodyWithoutDelegating(t *testing.T) {
 				r.Body = body
 			}
 
-			failure := errors.New("signing failed")
 			laterRan, delegated := false, false
 			transport := &outboundTransport{
 				hooks: []BeforeUpstreamHook{
-					beforeUpstreamFunc(func(context.Context, *RequestContext, *OutboundRequest) error {
-						return failure
+					beforeUpstreamFunc(func(context.Context, *RequestContext, *OutboundRequest) (*Rejection, error) {
+						return tc.rejection, tc.hookErr
 					}),
-					beforeUpstreamFunc(func(context.Context, *RequestContext, *OutboundRequest) error {
+					beforeUpstreamFunc(func(context.Context, *RequestContext, *OutboundRequest) (*Rejection, error) {
 						laterRan = true
 
-						return nil
+						return nil, nil
 					}),
 				},
 				base: roundTripperFunc(func(*http.Request) (*http.Response, error) {
@@ -96,20 +121,36 @@ func TestOutboundFailureClosesBodyWithoutDelegating(t *testing.T) {
 				_ = resp.Body.Close()
 			}
 
-			if resp != nil || !errors.Is(err, failure) {
-				t.Errorf("RoundTrip = %v, %v; want nil and the hook error", resp, err)
+			if resp != nil {
+				t.Errorf("RoundTrip() response = %v, want nil", resp)
 			}
 
-			if laterRan || delegated {
-				t.Errorf("later hook ran = %v, transport ran = %v; want false, false", laterRan, delegated)
+			if !errors.Is(err, tc.wantErr) {
+				t.Errorf("RoundTrip() error = %v, want an error that matches %v", err, tc.wantErr)
+			}
+
+			if laterRan {
+				t.Error("RoundTrip() later hook ran = true, want false")
+			}
+
+			if delegated {
+				t.Error("RoundTrip() base transport called = true, want false")
 			}
 
 			if tc.withBody && body.closes != 1 {
 				t.Errorf("body closed %d times, want 1", body.closes)
 			}
 
-			if rc.failure == nil || rc.failure.Phase != PhaseBeforeUpstream {
-				t.Errorf("recorded failure = %+v, want the hook error in BeforeUpstream", rc.failure)
+			if rc.failure == nil {
+				t.Fatal("RoundTrip() failure = nil, want a recorded failure")
+			}
+
+			if rc.failure.Phase != PhaseBeforeUpstream {
+				t.Errorf("RoundTrip() failure phase = %v, want BeforeUpstream", rc.failure.Phase)
+			}
+
+			if !errors.Is(rc.failure.Err, tc.wantErr) {
+				t.Errorf("RoundTrip() failure error = %v, want an error that matches %v", rc.failure.Err, tc.wantErr)
 			}
 		})
 	}

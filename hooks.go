@@ -13,12 +13,14 @@ import (
 // ctx is the context of the request that the global middleware passed on, and
 // r is that request. The hook must not change r or read its body.
 //
-// If RequestReceived returns an error, the later hooks of the phase do not
-// run, and the gateway does not route the request. It sends 500 Internal
-// Server Error without error details, and completion gets the error as a
-// [Failure] in [PhaseRequestReceived].
+// The result of RequestReceived follows the rules of [Rejection]. After a
+// rejection or an error, the later hooks of the phase do not run, and the
+// gateway does not route the request. For an error, the gateway sends 500
+// Internal Server Error without error details, or 499 when the error wraps
+// [context.Canceled] and the client is gone, and completion gets the error as
+// a [Failure] in [PhaseRequestReceived].
 type RequestReceivedHook interface {
-	RequestReceived(ctx context.Context, rc *RequestContext, r *http.Request) error
+	RequestReceived(ctx context.Context, rc *RequestContext, r *http.Request) (*Rejection, error)
 }
 
 // BeforeUpstreamHook is a lifecycle hook that runs after the route middleware,
@@ -34,12 +36,14 @@ type RequestReceivedHook interface {
 // that change those fields, so it is closer to the upstream (see
 // [Config.Hooks]).
 //
-// If BeforeUpstream returns an error, the later hooks of the phase do not run,
-// and the transport is not called. The gateway sends 500 Internal Server Error
-// without error details, and completion gets the error as a [Failure] in
+// The result of BeforeUpstream follows the rules of [Rejection]. After a
+// rejection or an error, the later hooks of the phase do not run, and the
+// transport is not called. For an error, the gateway sends 500 Internal Server
+// Error without error details, or 499 when the error wraps [context.Canceled]
+// and the client is gone, and completion gets the error as a [Failure] in
 // [PhaseBeforeUpstream].
 type BeforeUpstreamHook interface {
-	BeforeUpstream(ctx context.Context, rc *RequestContext, out *OutboundRequest) error
+	BeforeUpstream(ctx context.Context, rc *RequestContext, out *OutboundRequest) (*Rejection, error)
 }
 
 // UpstreamResponseHook is a lifecycle hook that runs after the upstream
@@ -50,8 +54,9 @@ type BeforeUpstreamHook interface {
 // The hook does not run for responses that the gateway or middleware make, or
 // for informational (1xx) responses, except 101 Switching Protocols. The
 // hook can change resp. A hook that replaces resp.Body must close the original
-// body and update or delete Content-Length. After the hooks, the gateway
-// applies the rules in the [Gateway] documentation to the response headers.
+// body and update or delete Content-Length. A nil resp.Body is an empty body.
+// After the hooks, the gateway applies the rules in the [Gateway]
+// documentation to the response headers.
 //
 // The hook can change a final status only to another status from 200 to 599.
 // It must not change the status of a 101 response, and it must not change
@@ -65,13 +70,27 @@ type BeforeUpstreamHook interface {
 // resp.Request is the outbound request that the gateway sent, also when the
 // transport returned another request.
 //
-// If UpstreamResponse returns an error, the later hooks of the phase do not
-// run. The gateway closes the upstream body, sends 500 Internal Server Error
-// without error details, and completion gets the error as a [Failure] in
-// [PhaseUpstreamResponse].
+// The result of UpstreamResponse follows the rules of [Rejection]. After a
+// rejection or an error, the later hooks of the phase do not run, and the
+// gateway closes the upstream body. For an error, the gateway sends 500
+// Internal Server Error without error details, 502 Bad Gateway when the error
+// wraps [ErrInvalidUpstreamResponse], or 499 when the error wraps
+// [context.Canceled] and the client is gone. Completion gets the error as a
+// [Failure] in [PhaseUpstreamResponse].
+//
+// A hook must not replace the body of a 101 response with a body that does
+// not implement [io.ReadWriteCloser]. Otherwise the gateway sends 500
+// Internal Server Error.
 type UpstreamResponseHook interface {
-	UpstreamResponse(ctx context.Context, rc *RequestContext, resp *http.Response) error
+	UpstreamResponse(ctx context.Context, rc *RequestContext, resp *http.Response) (*Rejection, error)
 }
+
+// ErrInvalidUpstreamResponse is the error that an [UpstreamResponseHook] wraps
+// when it finds that the upstream response is not valid, such as a missing
+// required signature. The gateway then sends 502 Bad Gateway, because the
+// failure is in the upstream. In another phase, it has no effect on the
+// status. Use [errors.Is] to identify it.
+var ErrInvalidUpstreamResponse = errors.New("invalid upstream response")
 
 // RequestCompletedHook is a lifecycle hook that runs once for each request,
 // at completion: after the gateway-managed handler chain returned or finished

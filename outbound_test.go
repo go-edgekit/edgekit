@@ -77,7 +77,7 @@ func TestBeforeUpstreamHookChangesReachTransport(t *testing.T) {
 		seen view
 		kept *edgekit.OutboundRequest
 	)
-	hooks := beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) error {
+	hooks := beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 		seen = view{
 			method:        out.Method(),
 			url:           out.URL().String(),
@@ -92,7 +92,7 @@ func TestBeforeUpstreamHookChangesReachTransport(t *testing.T) {
 		out.Header().Set("X-Signature", "signed")
 		kept = out
 
-		return nil
+		return nil, nil
 	})
 	var inboundSignature []string
 	routeMiddleware := func(next http.Handler) http.Handler {
@@ -192,10 +192,10 @@ func TestConfiguredTransportWithAndWithoutOutboundHooks(t *testing.T) {
 			completionHooks, completed := completions()
 			providers := []any{completionHooks}
 			if tc.withHooks {
-				providers = append(providers, beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) error {
+				providers = append(providers, beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 					out.Header().Set("X-Hook", "ran")
 
-					return nil
+					return nil, nil
 				}))
 			}
 			g := newGateway(t, edgekit.Config{
@@ -212,7 +212,7 @@ func TestConfiguredTransportWithAndWithoutOutboundHooks(t *testing.T) {
 
 			wantStatus, wantBody := http.StatusOK, "ok"
 			if tc.fail {
-				wantStatus, wantBody = http.StatusBadGateway, "Bad Gateway\n"
+				wantStatus, wantBody = http.StatusBadGateway, problem(http.StatusBadGateway, "")
 			}
 			if calls.Load() != 1 || w.Code != wantStatus || w.Body.String() != wantBody {
 				t.Errorf("calls = %d, response = %d %q; want 1, %d %q", calls.Load(), w.Code, w.Body.String(), wantStatus, wantBody)
@@ -266,7 +266,7 @@ func TestBeforeUpstreamHeaderRules(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			transport, sent := recordingTransport(t)
-			hooks := beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) error {
+			hooks := beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 				header := out.Header()
 				header.Set("X-User", "verified")
 				header.Set("Connection", "X-User")
@@ -282,7 +282,7 @@ func TestBeforeUpstreamHeaderRules(t *testing.T) {
 				header.Set("Trailer", "X-Signature")
 				header.Set("X-Signature", "signed")
 
-				return nil
+				return nil, nil
 			})
 			g := newGateway(t, edgekit.Config{
 				Routes: []edgekit.Route{{
@@ -417,10 +417,10 @@ func TestBeforeUpstreamInvalidHeaderFails(t *testing.T) {
 					Request:    r,
 				}, nil
 			})
-			hooks := beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) error {
+			hooks := beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 				out.Header()[tc.key] = []string{tc.value}
 
-				return nil
+				return nil, nil
 			})
 			var unwound, unwoundAtCompletion bool
 			var completion edgekit.Completion
@@ -449,7 +449,7 @@ func TestBeforeUpstreamInvalidHeaderFails(t *testing.T) {
 				return
 			}
 
-			if w.Code != http.StatusInternalServerError || w.Body.String() != "Internal Server Error\n" || calls.Load() != 0 {
+			if w.Code != http.StatusInternalServerError || w.Body.String() != problem(http.StatusInternalServerError, "") || calls.Load() != 0 {
 				t.Errorf("response = %d %q, transport calls = %d; want 500 without details and no call", w.Code, w.Body.String(), calls.Load())
 			}
 
@@ -512,10 +512,10 @@ func TestOutboundHostIsTheValueThatTheUpstreamGets(t *testing.T) {
 				"192.0.2.1:80",
 			} {
 				var seen string
-				hooks := beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) error {
+				hooks := beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 					seen = out.Host()
 
-					return nil
+					return nil, nil
 				})
 				g := newGateway(t, edgekit.Config{
 					Routes: []edgekit.Route{{
@@ -590,10 +590,10 @@ func TestSelectedHostThatTheTransportChangesIsRejected(t *testing.T) {
 func TestKeptOutboundRequestPanicsAfterTheHooks(t *testing.T) {
 	var kept *edgekit.OutboundRequest
 	hooks := &testHooks{
-		before: func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) error {
+		before: func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 			kept = out
 
-			return nil
+			return nil, nil
 		},
 	}
 	transport, _ := recordingTransport(t)

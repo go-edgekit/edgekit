@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -72,6 +73,22 @@ func receive[T any](t *testing.T, ch <-chan T) T {
 
 		return zero
 	}
+}
+
+// problem returns the body that the default renderer writes for status and
+// reason.
+func problem(status int, reason edgekit.RejectionReason) string {
+	body := `{"type":"about:blank"`
+	if title := http.StatusText(status); title != "" {
+		body += `,"title":"` + title + `"`
+	}
+
+	body += `,"status":` + strconv.Itoa(status)
+	if reason != "" {
+		body += `,"reason":"` + string(reason) + `"`
+	}
+
+	return body + "}"
 }
 
 // pointerSelector is an UpstreamSelector with a pointer receiver, so a nil
@@ -231,8 +248,8 @@ func TestGlobalMiddlewareRunsForRouteMiss(t *testing.T) {
 		t.Error("global middleware ran = false, want true")
 	}
 
-	if w.Code != http.StatusNotFound || w.Body.String() != "Not Found\n" {
-		t.Errorf("response = %d %q, want 404 %q", w.Code, w.Body.String(), "Not Found\n")
+	if want := problem(http.StatusNotFound, edgekit.ReasonNoRoute); w.Code != http.StatusNotFound || w.Body.String() != want {
+		t.Errorf("response = %d %q, want 404 %q", w.Code, w.Body.String(), want)
 	}
 }
 
@@ -441,22 +458,22 @@ func TestCustomUpstreamSelector(t *testing.T) {
 		{
 			pool:   "credentials",
 			status: http.StatusInternalServerError,
-			body:   "Internal Server Error\n",
+			body:   problem(http.StatusInternalServerError, ""),
 		},
 		{
 			pool:   "query",
 			status: http.StatusInternalServerError,
-			body:   "Internal Server Error\n",
+			body:   problem(http.StatusInternalServerError, ""),
 		},
 		{
 			pool:   "nil",
 			status: http.StatusInternalServerError,
-			body:   "Internal Server Error\n",
+			body:   problem(http.StatusInternalServerError, ""),
 		},
 		{
 			pool:   "error",
 			status: http.StatusInternalServerError,
-			body:   "Internal Server Error\n",
+			body:   problem(http.StatusInternalServerError, ""),
 		},
 	} {
 		t.Run(tc.pool, func(t *testing.T) {

@@ -2,6 +2,7 @@ package edgekit
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"time"
 )
@@ -31,6 +32,33 @@ type RequestContext struct {
 	failure   *Failure
 	state     map[any]any
 	ended     bool
+
+	// entry is the context that the caller gave to ServeHTTP. It is kept
+	// until completion ends, only to see whether the client is gone.
+	entry context.Context
+
+	// status and header are the response of the recorded rejection or
+	// failure. status is 0 before an outcome.
+	status int
+	header http.Header
+
+	// committed is true after the proxy sent a final status, wrote or
+	// flushed the body, or found the connection hijacked: the gateway can
+	// then not send its own response. Only the proxy writer sets it, because
+	// the gateway cannot see a commit by middleware.
+	committed bool
+
+	// facts is nil until the transport is called. The trace callbacks write
+	// only to it, because they can run after completion.
+	facts *transportFacts
+
+	// switching is true after the gateway accepted a 101 response, so a
+	// later failure is in PhaseProtocolSwitch.
+	switching bool
+
+	// upgradeBody is the body of the accepted 101 response. ReverseProxy
+	// does not close it for some failures of the protocol switch.
+	upgradeBody *upgradeBody
 
 	// outbound is reused for the BeforeUpstream hooks, so the view needs no
 	// allocation of its own.
@@ -76,20 +104,11 @@ func (rc *RequestContext) SelectedUpstream() (*url.URL, bool) {
 	return &upstream, true
 }
 
-// fail keeps the first failure, because later failures are consequences of it.
-func (rc *RequestContext) fail(phase Phase, err error) {
-	if rc.failure == nil {
-		rc.failure = &Failure{
-			Phase: phase,
-			Err:   err,
-		}
-	}
-}
-
 // end drops the state, so a kept RequestContext does not keep values alive.
 func (rc *RequestContext) end() {
 	rc.state = nil
 	rc.ended = true
+	rc.entry = nil
 }
 
 // StateKey identifies request state of type T. Each key has its own identity,

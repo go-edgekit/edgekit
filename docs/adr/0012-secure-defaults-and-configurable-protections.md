@@ -53,3 +53,5 @@ R5 uses typed dial and request-written failures (R10), never error strings. R6 a
 The classification was extended on 2026-11-01, after reviewing the [proxy implementation survey](../investigations/proxy-implementation-survey.md) against this ADR: managed headers, opaque/absolute-form/`CONNECT` rejection, and transport compression were added, and R9 moved from configurable protection to secure default. Reclassify a protection only with evidence about workloads.
 
 **Refined 2026-11-03:** [ADR-0017](0017-failure-status-by-source.md) sets the status of the failures that R5 does not cover, by the source of the failure.
+
+**Refined 2026-11-04:** [ADR-0023](0023-failure-evidence-and-transport-facts.md) defines the evidence for R5 and the parts of R10 that the core provides.

@@ -372,7 +372,7 @@ func TestResponseHeaderRulesAfterHooks(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) error {
+	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 		for name, value := range map[string]string{
 			"Connection":          "X-Hop",
 			"X-Hop":               "private",
@@ -395,7 +395,7 @@ func TestResponseHeaderRulesAfterHooks(t *testing.T) {
 			resp.Trailer[name] = nil
 		}
 
-		return nil
+		return nil, nil
 	})
 	server := hookServer(t, upstream.URL, hooks)
 
@@ -533,12 +533,12 @@ func TestResponseContentLengthAfterHooks(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) error {
+			hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 				if tc.change != nil {
 					tc.change(resp.Header)
 				}
 
-				return nil
+				return nil, nil
 			})
 			var serverLog bytes.Buffer
 			server := httptest.NewUnstartedServer(newGateway(t, edgekit.Config{
@@ -620,7 +620,7 @@ func TestUpgradeResponseHeaderRulesAfterHooks(t *testing.T) {
 		"X-Hop: private\r\n"+
 		"Keep-Alive: timeout=5\r\n")
 
-	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) error {
+	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 		if resp.StatusCode != http.StatusSwitchingProtocols {
 			t.Errorf("hook got status %d, want 101", resp.StatusCode)
 		}
@@ -641,7 +641,7 @@ func TestUpgradeResponseHeaderRulesAfterHooks(t *testing.T) {
 			resp.Header.Set(name, value)
 		}
 
-		return nil
+		return nil, nil
 	})
 	server := hookServer(t, upstream.URL, hooks)
 
@@ -725,10 +725,10 @@ func TestUpgradeProtocolIsRestoredAfterHooks(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) error {
+			hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 				tc.change(resp.Header)
 
-				return nil
+				return nil, nil
 			})
 			completionHooks, completed := completions()
 			server := hookServer(t, upstream.URL, hooks, completionHooks)
@@ -779,8 +779,9 @@ func TestUpgradeMismatchFromUpstream(t *testing.T) {
 	}
 
 	c := receive(t, completed)
-	if c.Failure == nil || c.Failure.Phase != edgekit.PhaseUnknown {
-		t.Errorf("completion failure = %+v, want a failure of the proxy without a known source", c.Failure)
+	// The stage is known, but not the source of the failure (ADR-0023).
+	if c.Failure == nil || c.Failure.Phase != edgekit.PhaseProtocolSwitch {
+		t.Errorf("completion failure = %+v, want a failure in the protocol switch", c.Failure)
 	}
 }
 
@@ -794,10 +795,10 @@ func TestResponseHooksSkipInformationalResponses(t *testing.T) {
 	defer upstream.Close()
 
 	var statuses []int
-	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) error {
+	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 		statuses = append(statuses, resp.StatusCode)
 
-		return nil
+		return nil, nil
 	})
 	server := hookServer(t, upstream.URL, hooks)
 
@@ -835,12 +836,12 @@ func TestConnectionTokensDoNotDependOnMapOrder(t *testing.T) {
 	// One Connection entry names Connection itself. If the core removed
 	// fields while it read the tokens, the order of the map would decide
 	// whether it reads the other entry.
-	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) error {
+	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 		resp.Header["Connection"] = []string{"Connection"}
 		resp.Header["connection"] = []string{"X-Hop"}
 		resp.Header["X-Hop"] = []string{"private"}
 
-		return nil
+		return nil, nil
 	})
 	g := newGateway(t, edgekit.Config{
 		Routes: []edgekit.Route{{
@@ -869,12 +870,12 @@ func TestConnectionTokensDoNotDependOnMapOrder(t *testing.T) {
 
 func TestUpgradeConnectionTokensDoNotDependOnMapOrder(t *testing.T) {
 	upstream := upgradeUpstream(t, "Connection: Upgrade\r\nUpgrade: echo\r\n")
-	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) error {
+	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 		resp.Header["Connection"] = []string{"Upgrade, Connection"}
 		resp.Header["connection"] = []string{"X-Hop"}
 		resp.Header["X-Hop"] = []string{"private"}
 
-		return nil
+		return nil, nil
 	})
 	server := hookServer(t, upstream.URL, hooks)
 
@@ -921,7 +922,7 @@ func TestResponseHooksGetTheGatewayContext(t *testing.T) {
 				route       string
 				derived     any
 			)
-			hooks := upstreamResponseFunc(func(ctx context.Context, rc *edgekit.RequestContext, _ *http.Response) error {
+			hooks := upstreamResponseFunc(func(ctx context.Context, rc *edgekit.RequestContext, _ *http.Response) (*edgekit.Rejection, error) {
 				fromContext, ok := edgekit.FromContext(ctx)
 				sameContext = ok && rc != nil && fromContext == rc
 				if rc != nil {
@@ -930,7 +931,7 @@ func TestResponseHooksGetTheGatewayContext(t *testing.T) {
 
 				derived = ctx.Value(derivedKey{})
 
-				return nil
+				return nil, nil
 			})
 			g := newGateway(t, edgekit.Config{
 				Routes: []edgekit.Route{{
@@ -986,7 +987,7 @@ func TestResponseHookCannotCrossTheUpgradeBoundary(t *testing.T) {
 			upstream: http.StatusSwitchingProtocols,
 			changeTo: http.StatusForbidden,
 			status:   http.StatusInternalServerError,
-			body:     "Internal Server Error\n",
+			body:     problem(http.StatusInternalServerError, ""),
 			failure:  true,
 		},
 		{
@@ -994,7 +995,7 @@ func TestResponseHookCannotCrossTheUpgradeBoundary(t *testing.T) {
 			upstream: http.StatusOK,
 			changeTo: http.StatusSwitchingProtocols,
 			status:   http.StatusInternalServerError,
-			body:     "Internal Server Error\n",
+			body:     problem(http.StatusInternalServerError, ""),
 			failure:  true,
 		},
 		{
@@ -1002,7 +1003,7 @@ func TestResponseHookCannotCrossTheUpgradeBoundary(t *testing.T) {
 			upstream: http.StatusOK,
 			changeTo: http.StatusEarlyHints,
 			status:   http.StatusInternalServerError,
-			body:     "Internal Server Error\n",
+			body:     problem(http.StatusInternalServerError, ""),
 			failure:  true,
 		},
 		{
@@ -1010,7 +1011,7 @@ func TestResponseHookCannotCrossTheUpgradeBoundary(t *testing.T) {
 			upstream: http.StatusOK,
 			changeTo: 600,
 			status:   http.StatusInternalServerError,
-			body:     "Internal Server Error\n",
+			body:     problem(http.StatusInternalServerError, ""),
 			failure:  true,
 		},
 		{
@@ -1018,7 +1019,7 @@ func TestResponseHookCannotCrossTheUpgradeBoundary(t *testing.T) {
 			upstream: http.StatusOK,
 			changeTo: 199,
 			status:   http.StatusInternalServerError,
-			body:     "Internal Server Error\n",
+			body:     problem(http.StatusInternalServerError, ""),
 			failure:  true,
 		},
 		{
@@ -1055,13 +1056,13 @@ func TestResponseHookCannotCrossTheUpgradeBoundary(t *testing.T) {
 					Request:    r,
 				}, nil
 			})
-			hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) error {
+			hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 				_ = resp.Body.Close()
 				resp.StatusCode = tc.changeTo
 				resp.Body = io.NopCloser(strings.NewReader("denied"))
 				resp.Header.Del("Content-Length")
 
-				return nil
+				return nil, nil
 			})
 			completionHooks, completed := completions()
 			g := newGateway(t, edgekit.Config{

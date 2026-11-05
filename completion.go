@@ -29,13 +29,32 @@ type Completion struct {
 	// not prove that the gateway connected to it.
 	SelectedUpstream *url.URL
 
-	// RejectionReason is the reason when the core rejected the request. It is
-	// empty when the core recorded no rejection. Rejections by middleware or
-	// hooks do not set it.
+	// RejectionReason is the reason of an explicit rejection: by the core,
+	// or by a hook with a valid [Rejection]. It is empty when no explicit
+	// rejection was recorded. Responses that middleware writes do not set it.
+	// A rejection is not a failure: Failure is then nil.
 	RejectionReason RejectionReason
 
 	// Failure is the first failure that the gateway observed, or nil.
 	Failure *Failure
+
+	// ConnectionObtained is true when the transport reported, with
+	// [net/http/httptrace.ClientTrace.GotConn], a connection for at least one
+	// attempt of the round trip. The connection can be to a proxy that the
+	// transport uses.
+	ConnectionObtained bool
+
+	// RequestWritten is true when the transport reported, with
+	// [net/http/httptrace.ClientTrace.WroteRequest], that it wrote the
+	// complete request in at least one attempt. It does not prove that the
+	// upstream read the request.
+	//
+	// ConnectionObtained and RequestWritten are facts about the request, not
+	// about the attempt that failed, because the transport can retry. False
+	// means that the transport did not report the event before completion
+	// started. [net/http.Transport] reports both events; another transport
+	// reports them only when it calls the same trace hooks.
+	RequestWritten bool
 
 	// Aborted is true when the gateway-managed handler chain did not return
 	// normally, such as during a panic. A failure while the response streams
@@ -50,6 +69,8 @@ type Failure struct {
 
 	// Err is the error, without changes. It can contain secrets or request
 	// data, so do not log it or send it to clients without application policy.
+	// It wraps [ErrInvalidRejection] when a hook returned a [Rejection] that
+	// is not valid.
 	Err error
 }
 
@@ -60,8 +81,7 @@ type Phase int
 // hook: a stage can fail also when no hook is configured for it.
 const (
 	// PhaseUnknown is a failure that [net/http/httputil.ReverseProxy]
-	// reports without a known source, such as a protocol switch that the
-	// upstream did not accept.
+	// reports before a known stage of the gateway.
 	PhaseUnknown Phase = iota
 
 	// PhaseRequestReceived is the stage of the [RequestReceivedHook] hooks.
@@ -70,10 +90,11 @@ const (
 	// PhaseUpstreamSelection is the selection of the upstream URL.
 	PhaseUpstreamSelection
 
-	// PhaseBeforeUpstream is the stage of the [BeforeUpstreamHook] hooks and
-	// the outbound header check (see [Gateway]), after the route middleware
-	// and before the transport. It also records an invalid header that
-	// middleware set when no hook is configured.
+	// PhaseBeforeUpstream is the stage after the route middleware and before
+	// the transport: the [BeforeUpstreamHook] hooks and the checks of the
+	// outbound request (see [Gateway]). The checks also run when no hook is
+	// configured, so this phase can record an invalid header or Upgrade
+	// value that middleware set.
 	PhaseBeforeUpstream
 
 	// PhaseRoundTrip is the round trip of the transport to the upstream.
@@ -82,6 +103,12 @@ const (
 	// PhaseUpstreamResponse is the stage of the [UpstreamResponseHook]
 	// hooks.
 	PhaseUpstreamResponse
+
+	// PhaseProtocolSwitch is the switch to another protocol after the
+	// gateway accepted a 101 Switching Protocols response: the check of the
+	// protocol, the hijack of the client connection, and the write of the 101
+	// response to it.
+	PhaseProtocolSwitch
 )
 
 // String returns a fixed name for the phase, for logs.
@@ -99,15 +126,20 @@ func (p Phase) String() string {
 		return "round_trip"
 	case PhaseUpstreamResponse:
 		return "upstream_response"
+	case PhaseProtocolSwitch:
+		return "protocol_switch"
 	default:
 		return "invalid"
 	}
 }
 
-// RejectionReason is a public code for a rejection by the core, such as
-// "invalid_path". The core sets it only from the constants of this package. It
-// names the check that refused the request, never the value that failed the
-// check, so it contains no request content.
+// RejectionReason is a public code that names the check that refused a
+// request, such as "invalid_path". It is a static name, never an identifier
+// or a value from the request.
+//
+// The codes of the core are the constants of this package and never contain
+// ".". The codes of extensions have the form "<extension>.<check>" (see
+// [Rejection]), so the two sets cannot collide.
 type RejectionReason string
 
 // The rejection reasons of the secure-default checks (see [Gateway]).
@@ -117,29 +149,43 @@ const (
 	ReasonInvalidPath          RejectionReason = "invalid_path"
 	ReasonInvalidQuery         RejectionReason = "invalid_query"
 	ReasonInvalidHeaderName    RejectionReason = "invalid_header_name"
+	ReasonInvalidUpgrade       RejectionReason = "invalid_upgrade"
 )
 
 // ReasonNoRoute is the rejection reason of a request that matched no route.
 const ReasonNoRoute RejectionReason = "no_route"
 
-// completion returns a new snapshot for each hook, so a hook that changes its
-// copy does not change the copy of another hook.
+// completion reads the transport facts once, so all completion hooks get the
+// same snapshot.
 func (rc *RequestContext) completion(duration time.Duration, aborted bool) Completion {
 	c := Completion{
-		Start:           rc.start,
-		Duration:        duration,
-		RoutePrefix:     rc.route,
-		RejectionReason: rc.rejection,
-		Aborted:         aborted,
+		Start:            rc.start,
+		Duration:         duration,
+		RoutePrefix:      rc.route,
+		SelectedUpstream: rc.upstream,
+		RejectionReason:  rc.rejection,
+		Failure:          rc.failure,
+		Aborted:          aborted,
 	}
 
-	if rc.upstream != nil {
-		upstream := *rc.upstream
+	if rc.facts != nil {
+		c.ConnectionObtained = rc.facts.connected.Load()
+		c.RequestWritten = rc.facts.written.Load()
+	}
+
+	return c
+}
+
+// copyCompletion gives each hook its own copy of the pointer fields, so a hook
+// that changes its copy does not change the copy of another hook.
+func copyCompletion(c Completion) Completion {
+	if c.SelectedUpstream != nil {
+		upstream := *c.SelectedUpstream
 		c.SelectedUpstream = &upstream
 	}
 
-	if rc.failure != nil {
-		failure := *rc.failure
+	if c.Failure != nil {
+		failure := *c.Failure
 		c.Failure = &failure
 	}
 
