@@ -126,6 +126,54 @@ func TestUpstreamTransportPolicy(t *testing.T) {
 	}
 }
 
+func TestTransportTLSHandshakeTimeout(t *testing.T) {
+	var lc net.ListenConfig
+	listener, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		defer close(accepted)
+
+		conn, acceptErr := listener.Accept()
+		if acceptErr == nil {
+			accepted <- conn
+		}
+	}()
+
+	t.Cleanup(func() {
+		// Best-effort closes release the accept goroutine on every return path.
+		_ = listener.Close()
+		if conn, ok := <-accepted; ok {
+			_ = conn.Close()
+		}
+	})
+
+	transport := testTransport(t)
+	transport.TLSHandshakeTimeout = 100 * time.Millisecond
+
+	// The upstream accepts TCP, but never answers the ClientHello.
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://"+listener.Addr().String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := (&http.Client{
+		Transport: transport,
+		Timeout:   5 * time.Second,
+	}).Do(request)
+	if err == nil {
+		_ = response.Body.Close()
+	}
+
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() || errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Do() error = %v, want a TLS handshake timeout before the client timeout", err)
+	}
+}
+
 func TestUpstreamDialRespectsCanceledContext(t *testing.T) {
 	transport := testTransport(t)
 	ctx, cancel := context.WithCancel(t.Context())

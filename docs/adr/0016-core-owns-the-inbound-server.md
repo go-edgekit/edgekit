@@ -25,3 +25,7 @@ TLS termination and certificate management are not decided here.
 ## Alternatives considered
 
 - **Embedder or distribution owns the server:** Keeps the core a pure handler, but server-level secure defaults could not be enforced and ADR-0012 would have to drop them.
+
+## Validation / follow-up
+
+**Refined 2026-11-05:** [ADR-0024](0024-hardened-server-deadlines-and-upgraded-connections.md) defines the configuration rules, the deadline ownership, and the handling of upgraded connections at shutdown. TLS termination and certificate management stay undecided: the server accepts a `tls.Config` from the caller.

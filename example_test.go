@@ -66,6 +66,122 @@ func ExampleNew() {
 	// /admin: 404 {"type":"about:blank","title":"Not Found","status":404,"reason":"no_route"}
 }
 
+func ExampleServer() {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "upstream response")
+	}))
+	defer upstream.Close()
+
+	target, err := url.Parse(upstream.URL)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	selector, err := edgekit.StaticUpstream(target)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	gateway, err := edgekit.New(edgekit.Config{
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: selector,
+			},
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+	defer gateway.CloseIdleConnections()
+
+	// The zero ServerConfig applies all secure defaults. A disabled timeout
+	// is always explicit, such as KeepAliveTimeout: edgekit.NoTimeout.
+	server, err := edgekit.NewServer(gateway, edgekit.ServerConfig{
+		TransferIdleTimeout: time.Minute,
+	})
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	var lc net.ListenConfig
+	listener, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	served := make(chan struct{})
+	var serveErr error
+	go func() {
+		defer close(served)
+		serveErr = server.Serve(listener)
+	}()
+	defer func() {
+		// Close is best effort after Shutdown, and stops Serve on early returns.
+		_ = server.Close()
+		<-served
+	}()
+
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://"+listener.Addr().String()+"/api/users", nil)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	body, readErr := io.ReadAll(response.Body)
+	closeErr := response.Body.Close()
+	if readErr != nil {
+		fmt.Println(readErr)
+
+		return
+	}
+
+	if closeErr != nil {
+		fmt.Println(closeErr)
+
+		return
+	}
+
+	fmt.Println(response.StatusCode, string(body))
+
+	// Shutdown waits for the active requests. When the time ends first,
+	// Close stops them.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		_ = server.Close()
+	}
+
+	<-served
+	fmt.Println(errors.Is(serveErr, http.ErrServerClosed))
+
+	// Output:
+	// 200 upstream response
+	// true
+}
+
 // regionSelector selects the upstream for the region that route middleware
 // put in the X-Region header.
 type regionSelector map[string]*url.URL

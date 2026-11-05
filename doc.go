@@ -11,7 +11,9 @@
 // request state on the [RequestContext].
 //
 // Use [New] to make a [Gateway] from a [Config]. The configuration is fixed
-// when New returns. To change it, make a new gateway.
+// when New returns. To change it, make a new gateway. Serve the gateway with
+// a [Server] from [NewServer], which applies the server-level secure
+// defaults.
 //
 // The API is provisional until version 1.
 package edgekit

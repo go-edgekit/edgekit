@@ -6,12 +6,11 @@ edgekit is not a CDN, an edge-computing platform, or a cache. It serves, routes,
 
 ## Status
 
-A rewrite replaces the first prototype in slices. See the [roadmap](docs/roadmap.md) and the [rewrite ledger](docs/rewrite-ledger.md). Slice 1, the proxy core, is done: routing, upstream selection, forwarding, header handling, the transport, and the request secure defaults. Slice 2 is done: lifecycle hooks, typed request state, completion with execution facts, and managed headers that extensions declare. Slice 3 is done: typed rejections from hooks, a replaceable renderer with a minimal `problem+json` default, and failure statuses from evidence, including 499 and 504.
+A rewrite replaces the first prototype in slices. See the [roadmap](docs/roadmap.md) and the [rewrite ledger](docs/rewrite-ledger.md). Slice 1, the proxy core, is done: routing, upstream selection, forwarding, header handling, the transport, and the request secure defaults. Slice 2 is done: lifecycle hooks, typed request state, completion with execution facts, and managed headers that extensions declare. Slice 3 is done: typed rejections from hooks, a replaceable renderer with a minimal `problem+json` default, and failure statuses from evidence, including 499 and 504. Slice 4 is done: the hardened `Server`, with header limits, HTTP/2 limits, transfer idle deadlines, and graceful shutdown that also closes upgraded connections.
 
 These parts are not in the core yet:
 
 - A typed dial failure for the failed attempt (R10). Completion has the request-written and connection facts, but not where a round trip failed.
-- The hardened server (slice 4). Until then, configure server-level limits on your own `http.Server`, such as `ReadHeaderTimeout` and `MaxHeaderBytes`.
 - Body limit, admission, and egress as core protections (slice 5). The packages in [`extensions/`](extensions) are prototype code until then.
 
 The Go API is provisional until version 1. The project is not ready for production use.
@@ -40,15 +39,30 @@ if err != nil {
 }
 defer gateway.CloseIdleConnections()
 
-server := &http.Server{
-    Addr:              ":8080",
-    Handler:           gateway,
-    ReadHeaderTimeout: 5 * time.Second,
-    MaxHeaderBytes:    64 << 10,
+// The zero ServerConfig applies all secure defaults.
+server, err := edgekit.NewServer(gateway, edgekit.ServerConfig{})
+if err != nil {
+    return err
+}
+
+listener, err := net.Listen("tcp", ":8080")
+if err != nil {
+    return err
+}
+
+go server.Serve(listener) // Returns http.ErrServerClosed after Shutdown.
+
+// At the end: wait for the active requests, then stop the rest.
+if err := server.Shutdown(ctx); err != nil {
+    server.Close()
 }
 ```
 
-The [`Example` functions](example_test.go) show a static route, a custom upstream selector, a selector function, and a changed transport.
+`Server` is the supported way to serve a gateway. A gateway in your own `http.Server` works, but then that server owns the header limits, the timeouts, and the upgraded connections.
+
+The [`examples/gateway`](examples/gateway) program serves a gateway with signals, graceful shutdown, and failure logs without error details.
+
+The [`Example` functions](example_test.go) show a static route, a custom upstream selector, a selector function, a changed transport, and the server.
 
 Middleware follows the `net/http` rule: it must not change the request that it gets. To change a request, call `r.Clone` and give the copy to the next handler.
 
@@ -61,6 +75,8 @@ The extension points are:
 ## Secure defaults
 
 Before any middleware runs, the gateway rejects `CONNECT`, request targets that are not in origin form, paths with dot-segments or encoded `.`, `/`, `\`, NUL, or `#`, queries that `url.ParseQuery` rejects (`;`, malformed percent-escapes, or more than 10000 parameters), so middleware and the upstream see the same parameters, and header or trailer names with characters other than letters, digits, and `-`. It removes forwarding and identity headers from the client, and headers that the configuration declares as managed, also from the names of request trailers. It removes hop-by-hop fields and `Alt-Svc` from responses, informational responses, and trailers. The transport has bounded timeouts, uses no environment proxy, and does no transparent compression.
+
+The `Server` limits the header-read time (10s) and the header size (64 KiB), limits HTTP/2 to 100 streams for each connection with a 64 KiB stream window and a 1 MiB connection window, and stops a body transfer or an upgraded connection that makes no progress for 300s. It uses no total read or write timeouts, so long streams that make progress continue. Each value can change, and `edgekit.NoTimeout` disables a timeout explicitly; an omitted value always keeps the default. The `Server` GoDoc in [server.go](server.go) gives the rules.
 
 The `Gateway` GoDoc in [gateway.go](gateway.go) gives the complete list, the order of request handling, and the deliberate deviations from the HTTP specifications. The [threat model](docs/threat-model.md) shows which threats these defaults address.
 

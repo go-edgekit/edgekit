@@ -21,8 +21,9 @@ Slices:
 3. Typed rejections, the replaceable renderer, and typed failures (R10) ([ADR-0022](adr/0022-rejections-and-the-problem-response.md), [ADR-0023](adr/0023-failure-evidence-and-transport-facts.md)). Done.
    - The failures that `ReverseProxy` reported as `PhaseUnknown` have a source or a stage: a client `Upgrade` value that is not printable is a secure-default rejection with 400, a 101 body that cannot be written and a writer that cannot hijack are embedder defects with 500, and an upstream that does not accept the protocol switch is a failure in `PhaseProtocolSwitch` with 502.
    - R10 is covered in part: the original failure and the trace facts. A typed dial failure for the failed attempt comes with the egress dialer (slice 5).
-4. Core-owned hardened server, with a testable `Example` and an `examples/` program. Slice 1 removed the prototype `cmd/gateway` program.
-   - Upgraded connections: `ReverseProxy` hijacks the connection of a 101 response, and `http.Server.Shutdown` does not wait for or close hijacked connections. The server tracks them and closes them at shutdown, optionally after a delay, and the idle deadlines (R9) also apply to them. Caddy has `stream_timeout` and `stream_close_delay` for the same gap.
+4. Core-owned hardened server, with a testable `Example` and an `examples/` program ([ADR-0024](adr/0024-hardened-server-deadlines-and-upgraded-connections.md)). Done.
+   - Header-read timeout, header budget, HTTP/2 stream and window limits (R8), and transfer idle deadlines (R9) for requests and upgraded connections. Graceful shutdown closes the upgraded connections of the gateway before it waits for the other requests.
+   - TLS from a caller's `tls.Config`. Certificate management and the TLS-termination choice stay open.
 5. Body limit, admission, and egress as core protections. Configuration to relax each request secure default from slice 1.
 6. Bundled extensions: access log and outbound signing. Slice 1 removed the `headers` and `requesttag` demonstrations.
 
@@ -31,8 +32,8 @@ The rewrite is done when every ledger row is covered or dropped, the ledger and 
 Scope of the rewrite:
 
 - Public module path and Apache-2.0 license ([ADR-0014](adr/0014-multi-module-repository.md)). Done: `github.com/go-edgekit/edgekit` with the Apache-2.0 license.
-- Secure defaults R1–R5, R7, R8, and R9; opaque/absolute-form/`CONNECT` rejection; no transparent transport compression; extension-managed headers; body limit, admission, and egress as core protections ([ADR-0012](adr/0012-secure-defaults-and-configurable-protections.md)).
-- Core-owned hardened server ([ADR-0016](adr/0016-core-owns-the-inbound-server.md)).
+- Secure defaults R1–R5, R7, R8, and R9 (R8 and R9 done); opaque/absolute-form/`CONNECT` rejection; no transparent transport compression; extension-managed headers; body limit, admission, and egress as core protections ([ADR-0012](adr/0012-secure-defaults-and-configurable-protections.md)).
+- Core-owned hardened server ([ADR-0016](adr/0016-core-owns-the-inbound-server.md)). Done.
 - Typed dial and request-written failures (R10) as execution facts. Done in part: the request-written and connection facts, and evidence-based 499 and 504 ([ADR-0023](adr/0023-failure-evidence-and-transport-facts.md)). The typed dial failure is pending for the egress dialer.
 - Upstream-selector extension point with static selection ([ADR-0008](adr/0008-separate-routing-from-upstream-selection.md)).
 - Typed rejections and replaceable `problem+json` renderer ([ADR-0013](adr/0013-typed-rejections-and-replaceable-renderer.md), [ADR-0022](adr/0022-rejections-and-the-problem-response.md)). Done.

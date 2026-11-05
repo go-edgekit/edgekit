@@ -297,9 +297,11 @@ type Route struct {
 //
 // # Server-level protections
 //
-// A Gateway is a handler. Server-level protections, such as header-read
-// timeouts and header size limits, are the responsibility of the server that
-// calls it.
+// A Gateway is a handler. Serve it with a [Server], which applies the
+// server-level secure defaults: header-read timeouts, header size limits,
+// HTTP/2 limits, transfer idle deadlines, and the idle deadlines and shutdown
+// of upgraded connections (ADR-0016). When another server calls the gateway,
+// these protections are the responsibility of that server.
 type Gateway struct {
 	handler        http.Handler
 	hooks          hooks

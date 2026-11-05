@@ -68,6 +68,18 @@ _Avoid_: Route middleware (a different mechanism), route attribute
 The routes, extensions, and protections fixed when a gateway starts. Changing it requires a new gateway, never an in-place edit.
 _Avoid_: Policy data
 
+**Hardened server**:
+The server that the core provides to serve a gateway with the server-level secure defaults: header limits, HTTP/2 limits, transfer idle deadlines, and shutdown. A gateway in another server does not get them.
+_Avoid_: Edge server (edge is the deployment position, not this component)
+
+**Transfer idle deadline**:
+A limit on the time that one read or write of a body, or an upgraded connection, can make no progress. Each progress starts the time again. A handler that sets its own deadline for a direction takes over that direction for its request.
+_Avoid_: Read timeout, write timeout (these limit the total time in `net/http`)
+
+**Upgraded connection**:
+A client connection that the gateway took from `net/http` to forward a protocol switch (101 Switching Protocols). The hardened server applies transfer idle deadlines to it and closes it at shutdown. A connection that other code takes with `Hijack` is not an upgraded connection of the gateway.
+_Avoid_: Tunnel; hijacked connection, when the owner of the connection is important
+
 **Upstream selector**:
 An extension point that chooses the upstream URL for a matched request. The default chooses the route's single static upstream URL.
 _Avoid_: Load balancer (one possible selector)

@@ -55,3 +55,5 @@ The classification was extended on 2026-11-01, after reviewing the [proxy implem
 **Refined 2026-11-03:** [ADR-0017](0017-failure-status-by-source.md) sets the status of the failures that R5 does not cover, by the source of the failure.
 
 **Refined 2026-11-04:** [ADR-0023](0023-failure-evidence-and-transport-facts.md) defines the evidence for R5 and the parts of R10 that the core provides.
+
+**Refined 2026-11-05:** [ADR-0024](0024-hardened-server-deadlines-and-upgraded-connections.md) defines how a caller disables a server timeout, how a streaming route relaxes the idle deadlines (R9), and how the deadlines measure progress.
