@@ -460,6 +460,10 @@ func (w *proxyWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 	w.rc.committed = true
 
+	// The proxy owns the connection now. A Server applies its idle
+	// deadlines and closes it at shutdown.
+	adoptUpgraded(w.rc.entry, conn)
+
 	return conn, buffered, nil
 }
 
