@@ -114,6 +114,10 @@ func (t *outboundTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		return nil, err
 	}
 
+	// The trailers that arrive at the end of the body go to r, also when
+	// they arrive after the proxy copied the trailer map (ADR-0027).
+	rc.body.attachOutbound(r)
+
 	// Only the transport gets the trace. The UpstreamResponse hooks get the
 	// context of r, so their own requests cannot set the facts.
 	facts := &transportFacts{}

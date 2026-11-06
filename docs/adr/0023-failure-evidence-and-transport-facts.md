@@ -106,3 +106,7 @@ The core checks the `Upgrade` value with the predicate of `ReverseProxy`: a `Con
 ## Validation / follow-up
 
 Tests verify each rule with transports that control the order of the error and the cancellation, timeouts on HTTP/1.1 and HTTP/2 with `http.Transport`, a timeout without trace events, sentinels in the right phase and in another phase, the facts at completion for a closed port and for a written request, the same snapshot for two completion hooks, no facts from a request of a response hook, and each row of the protocol-switch table. For `http.ErrHijacked`, a test verifies a `Failure` in `PhaseProtocolSwitch` with the original error, with no call of the renderer and no write, flush, or header write on the response writer.
+
+**Amended 2026-11-05:** [ADR-0025](0025-core-protections-body-limit-admission-and-egress.md) adds the rule for 413 after the client-gone rule, and the typed dial failure `DialError` of the egress transport.
+
+**Amended 2026-11-05:** [ADR-0027](0027-request-trailers-at-the-end-of-the-body.md) adds the rule for 400 after the 413 rule, for a trailer name that the check at the end of the body rejected.

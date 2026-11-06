@@ -57,3 +57,5 @@ The classification was extended on 2026-11-01, after reviewing the [proxy implem
 **Refined 2026-11-04:** [ADR-0023](0023-failure-evidence-and-transport-facts.md) defines the evidence for R5 and the parts of R10 that the core provides.
 
 **Refined 2026-11-05:** [ADR-0024](0024-hardened-server-deadlines-and-upgraded-connections.md) defines how a caller disables a server timeout, how a streaming route relaxes the idle deadlines (R9), and how the deadlines measure progress.
+
+**Refined 2026-11-05:** [ADR-0025](0025-core-protections-body-limit-admission-and-egress.md) gives the body limit its default value, its route limits, and its explicit relaxation, and defines admission budgets and the egress transport. [ADR-0026](0026-relax-request-secure-defaults.md) defines which request secure defaults a gateway can relax, and how.

@@ -32,7 +32,8 @@ func checkConfig(cfg Config) (hooks, map[string]struct{}, []error) {
 		problems = append(problems, invalid("transport: %w", err))
 	}
 
-	problems = append(problems, checkRoutes(cfg.Routes)...)
+	problems = append(problems, checkRoutes(cfg.Routes, cfg.Admission)...)
+	problems = append(problems, checkProtections(cfg)...)
 
 	if i := slices.IndexFunc(cfg.Middleware, isNil); i >= 0 {
 		problems = append(problems, invalid("middleware %d: is nil", i))
@@ -83,8 +84,41 @@ func checkTransport(transport http.RoundTripper) error {
 	return nil
 }
 
-// checkRoutes validates routes without calling middleware.
-func checkRoutes(routes []Route) []error {
+// checkProtections validates the gateway-wide protections and relaxations.
+func checkProtections(cfg Config) []error {
+	var problems []error
+
+	if err := cfg.BodyLimit.check(); err != nil {
+		problems = append(problems, invalid("body limit: %w", err))
+	}
+
+	if err := checkBudget(cfg.Admission); err != nil {
+		problems = append(problems, invalid("admission budget: %w", err))
+	}
+
+	if !cfg.QueryPolicy.valid() {
+		problems = append(problems, invalid("query policy: is not a defined value"))
+	}
+
+	if !cfg.HeaderNamePolicy.valid() {
+		problems = append(problems, invalid("header-name policy: is not a defined value"))
+	}
+
+	return problems
+}
+
+// checkBudget accepts nil, which disables admission.
+func checkBudget(b *AdmissionBudget) error {
+	if b != nil && b.limit <= 0 {
+		return errors.New("is not made with NewAdmissionBudget")
+	}
+
+	return nil
+}
+
+// checkRoutes validates routes without calling middleware. A route must not
+// use gatewayBudget, because then one request takes two slots of it.
+func checkRoutes(routes []Route, gatewayBudget *AdmissionBudget) []error {
 	var problems []error
 
 	if len(routes) == 0 {
@@ -108,13 +142,23 @@ func checkRoutes(routes []Route) []error {
 		if j := slices.IndexFunc(r.Middleware, isNil); j >= 0 {
 			problems = append(problems, invalid("route %d: middleware %d: is nil", i, j))
 		}
+
+		if err := r.BodyLimit.check(); err != nil {
+			problems = append(problems, invalid("route %d: body limit: %w", i, err))
+		}
+
+		if err := checkBudget(r.Admission); err != nil {
+			problems = append(problems, invalid("route %d: admission budget: %w", i, err))
+		} else if r.Admission != nil && r.Admission == gatewayBudget {
+			problems = append(problems, invalid("route %d: admission budget: is also the gateway budget", i))
+		}
 	}
 
 	return problems
 }
 
 // isNilValue also detects a typed nil, such as a nil pointer or a nil function
-// in an interface value, because its methods would get a nil receiver.
+// in an interface value, because its methods get a nil receiver.
 func isNilValue(v any) bool {
 	if v == nil {
 		return true

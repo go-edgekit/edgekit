@@ -62,6 +62,8 @@ func (g *Gateway) forward(proxy *httputil.ReverseProxy, selector UpstreamSelecto
 			return
 		}
 
+		rc.body.recordCarried(r)
+
 		proxy.ServeHTTP(newProxyWriter(w, rc), r)
 
 		// The server sends the trailers after the handlers return, so a

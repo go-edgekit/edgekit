@@ -583,10 +583,10 @@ func TestUpstreamHeaderLimitBeforeResponseHooks(t *testing.T) {
 		http2 bool
 	}{
 		{
-			name: "HTTP/1.1",
+			name: "http1",
 		},
 		{
-			name:  "HTTP/2",
+			name:  "http2",
 			http2: true,
 		},
 	} {

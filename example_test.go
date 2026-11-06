@@ -12,8 +12,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -603,4 +605,201 @@ func ExampleRenderer() {
 	// Output:
 	// 503 application/vnd.api+json {"errors":[{"status":"503","title":"Service Unavailable"}]}
 	// 404 application/vnd.api+json {"errors":[{"status":"404","code":"no_route","title":"Not Found"}]}
+}
+
+func ExampleMaxBodyBytes() {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, err := io.Copy(io.Discard, r.Body)
+		if err != nil {
+			return
+		}
+
+		_, _ = fmt.Fprintf(w, "stored %d bytes", n)
+	}))
+	defer upstream.Close()
+
+	target, err := url.Parse(upstream.URL)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	selector, err := edgekit.StaticUpstream(target)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	gateway, err := edgekit.New(edgekit.Config{
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: selector,
+			},
+			{
+				// An upload route sets a larger limit explicitly.
+				Prefix:    "/upload/",
+				Upstream:  selector,
+				BodyLimit: edgekit.MaxBodyBytes(1 << 20),
+			},
+		},
+		// The gateway limit for all other routes. Omitted, it is
+		// edgekit.DefaultBodyLimit.
+		BodyLimit: edgekit.MaxBodyBytes(16),
+	})
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+	defer gateway.CloseIdleConnections()
+
+	body := strings.Repeat("x", 32)
+	for _, path := range []string{"/api/items", "/upload/files"} {
+		w := httptest.NewRecorder()
+		gateway.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
+		fmt.Printf("%s: %d %s\n", path, w.Code, w.Body.String())
+	}
+
+	// Output:
+	// /api/items: 413 {"type":"about:blank","title":"Request Entity Too Large","status":413,"reason":"body_too_large"}
+	// /upload/files: 200 stored 32 bytes
+}
+
+func ExampleNewAdmissionBudget() {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(entered)
+		<-release
+		_, _ = io.WriteString(w, "upstream response")
+	}))
+	defer upstream.Close()
+
+	target, err := url.Parse(upstream.URL)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	selector, err := edgekit.StaticUpstream(target)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	// One request at a time on this route; there is no queue.
+	budget, err := edgekit.NewAdmissionBudget(1)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	gateway, err := edgekit.New(edgekit.Config{
+		Routes: []edgekit.Route{
+			{
+				Prefix:    "/reports/",
+				Upstream:  selector,
+				Admission: budget,
+			},
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+	defer gateway.CloseIdleConnections()
+
+	first := make(chan *httptest.ResponseRecorder)
+	go func() {
+		w := httptest.NewRecorder()
+		gateway.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/reports/daily", nil))
+		first <- w
+	}()
+	<-entered
+
+	w := httptest.NewRecorder()
+	gateway.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/reports/weekly", nil))
+	fmt.Printf("second request: %d %s\n", w.Code, w.Body.String())
+
+	close(release)
+	w = <-first
+	fmt.Printf("first request: %d %s\n", w.Code, w.Body.String())
+
+	// Output:
+	// second request: 503 {"type":"about:blank","title":"Service Unavailable","status":503,"reason":"admission_saturated"}
+	// first request: 200 upstream response
+}
+
+func ExampleNewEgressTransport() {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "upstream response")
+	}))
+	defer upstream.Close()
+
+	routes := []edgekit.Route{}
+	for prefix, rawURL := range map[string]string{
+		"/api/":      upstream.URL,
+		"/metadata/": "http://169.254.169.254",
+	} {
+		target, err := url.Parse(rawURL)
+		if err != nil {
+			fmt.Println(err)
+
+			return
+		}
+
+		selector, err := edgekit.StaticUpstream(target)
+		if err != nil {
+			fmt.Println(err)
+
+			return
+		}
+
+		routes = append(routes, edgekit.Route{
+			Prefix:   prefix,
+			Upstream: selector,
+		})
+	}
+
+	// The gateway can connect only to this origin, and only to loopback
+	// addresses. A nil template uses the settings of NewTransport.
+	transport, err := edgekit.NewEgressTransport(nil, edgekit.EgressPolicy{
+		AllowedOrigins: []string{upstream.URL},
+		AllowedNetworks: []netip.Prefix{
+			netip.MustParsePrefix("127.0.0.0/8"),
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+	defer transport.CloseIdleConnections()
+
+	gateway, err := edgekit.New(edgekit.Config{
+		Routes:    routes,
+		Transport: transport,
+	})
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	for _, path := range []string{"/api/users", "/metadata/latest"} {
+		w := httptest.NewRecorder()
+		gateway.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		fmt.Printf("%s: %d %s\n", path, w.Code, w.Body.String())
+	}
+
+	// Output:
+	// /api/users: 200 upstream response
+	// /metadata/latest: 502 {"type":"about:blank","title":"Bad Gateway","status":502}
 }

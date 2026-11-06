@@ -308,11 +308,11 @@ var protocols = []struct {
 	http2 bool
 }{
 	{
-		name:  "HTTP/1.1",
+		name:  "http1",
 		http2: false,
 	},
 	{
-		name:  "HTTP/2",
+		name:  "http2",
 		http2: true,
 	},
 }

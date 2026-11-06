@@ -19,8 +19,8 @@ var ErrInvalidConfiguration = errors.New("invalid configuration")
 
 // Config is the configuration of a [Gateway]. [New] copies it, so later
 // changes to a Config value have no effect on the gateway. Values that Config
-// refers to, such as selectors, hook providers, and the transport, are shared
-// with the gateway.
+// refers to, such as selectors, hook providers, admission budgets, and the
+// transport, are shared with the gateway.
 type Config struct {
 	// Routes are the routes of the gateway. At least one route is necessary.
 	Routes []Route
@@ -52,7 +52,8 @@ type Config struct {
 	// Transport sends requests to upstreams. If it is nil, the gateway uses its
 	// own transport from [NewTransport]. A typed nil value, such as a nil
 	// pointer, is not permitted. A transport that you set is yours: the
-	// gateway does not close its connections.
+	// gateway does not close its connections. Set an [EgressTransport] to
+	// limit the destinations of the gateway.
 	//
 	// The transport must not decompress responses or add Accept-Encoding. New
 	// rejects an [*http.Transport] with DisableCompression set to false. It
@@ -71,6 +72,43 @@ type Config struct {
 	// for rejections and failures. If it is nil, the gateway writes a minimal
 	// RFC 9457 problem document (see [Renderer]).
 	Renderer Renderer
+
+	// BodyLimit is the request-body limit of the gateway (see [BodyLimit]).
+	// It applies before routing, and to each route whose own limit is
+	// omitted. The zero value is [DefaultBodyLimit]. [NoBodyLimit] disables
+	// it explicitly.
+	BodyLimit BodyLimit
+
+	// Admission is the admission budget of the gateway (see
+	// [AdmissionBudget]). The gateway takes a slot after the global
+	// middleware and before the [RequestReceivedHook] hooks. Nil means no
+	// gateway budget. The same budget must not also be the budget of a
+	// route.
+	Admission *AdmissionBudget
+
+	// QueryPolicy sets how the gateway checks the query before any middleware
+	// runs. The zero value, [QueryReject], is the secure default.
+	QueryPolicy QueryPolicy
+
+	// HeaderNamePolicy sets what the gateway does with header and trailer
+	// names that have characters other than ASCII letters, digits, and "-".
+	// The zero value, [HeaderNameReject], is the secure default.
+	HeaderNamePolicy HeaderNamePolicy
+
+	// AllowAbsoluteForm accepts a request target in the absolute form, such
+	// as "GET http://example.com/api HTTP/1.1", with the scheme http or https,
+	// a host, and no user information or fragment. An unescaped "#" anywhere
+	// in the target is a fragment, as in the origin form; "%23" is not.
+	// False, the zero value, rejects it (see [Gateway]). An accepted request
+	// is handled in the origin form with the same path and query, and with
+	// Host set to the authority of the target (RFC 9112, section 3.2.2).
+	// Middleware, hooks, and the upstream selector get a URL without scheme
+	// and host; an empty path becomes "/". The authority must be a host that
+	// [UpstreamSelector] accepts. It goes to the upstream only in
+	// X-Forwarded-Host, and does not select the upstream, except through a
+	// selector that reads Host. [http.Request.RequestURI] keeps the value
+	// that the client sent.
+	AllowAbsoluteForm bool
 }
 
 // Route is a match on the inbound request path. It sets the upstream selector
@@ -91,6 +129,17 @@ type Route struct {
 	// Middleware wraps the handling of the requests that match the route,
 	// after the global middleware. The first middleware is the outermost one.
 	Middleware []Middleware
+
+	// BodyLimit is the request-body limit of the route (see [BodyLimit]). The
+	// zero value uses [Config.BodyLimit]. Set a larger limit, or
+	// [NoBodyLimit], for upload routes.
+	BodyLimit BodyLimit
+
+	// Admission is the admission budget of the route (see
+	// [AdmissionBudget]). The gateway takes a slot after the route match and
+	// the body check, and before the route middleware. Nil means no route
+	// budget. Routes that have the same budget share it.
+	Admission *AdmissionBudget
 }
 
 // Gateway is an [http.Handler] that routes requests and forwards them to
@@ -102,23 +151,33 @@ type Route struct {
 //
 //  1. Make the gateway context ([RequestContext]).
 //  2. Check the request with the secure defaults (see below).
-//  3. Remove identity headers and managed headers.
+//  3. Remove identity headers and managed headers, and limit the body with
+//     the gateway body limit ([Config.BodyLimit]).
 //  4. Run the global middleware.
-//  5. Run the [RequestReceivedHook] hooks.
-//  6. Match a route. If no route matches, send 404 Not Found.
-//  7. Run the route middleware.
-//  8. Select the upstream URL.
-//  9. Rewrite the outbound request. The path is the upstream URL path
+//  5. Take a slot of the gateway admission budget ([Config.Admission]). If
+//     no slot is free, send 503 Service Unavailable.
+//  6. Run the [RequestReceivedHook] hooks.
+//  7. Match a route. If no route matches, send 404 Not Found.
+//  8. Apply the body limit of the route ([Route.BodyLimit]). If the
+//     declared length or the bytes that were read are more than the limit,
+//     send 413 Content Too Large.
+//  9. Take a slot of the route admission budget ([Route.Admission]). If no
+//     slot is free, send 503 Service Unavailable.
+//  10. Run the route middleware.
+//  11. Select the upstream URL.
+//  12. Rewrite the outbound request. The path is the upstream URL path
 //     followed by the inbound path. The query is the raw query of the
 //     request that the route middleware passes on, without changes. The Host
 //     header is the host of the upstream URL. The inbound Host goes in
 //     X-Forwarded-Host.
-//  10. Run the [BeforeUpstreamHook] hooks, then apply the outbound header
+//  13. Run the [BeforeUpstreamHook] hooks, then apply the outbound header
 //     rules (see below).
-//  11. Send the request with the transport.
-//  12. Run the [UpstreamResponseHook] hooks, apply the response header rules,
+//  14. Send the request with the transport.
+//  15. Run the [UpstreamResponseHook] hooks, apply the response header rules,
 //     and send the response.
-//  13. After the middleware returned or finished unwinding, run the
+//  16. Release each admission slot when the steps after it returned or
+//     finished unwinding.
+//  17. After the middleware returned or finished unwinding, run the
 //     [RequestCompletedHook] hooks.
 //
 // Middleware and hooks can end handling early. Then the later steps do not
@@ -144,8 +203,11 @@ type Route struct {
 //
 // A processing hook can reject a request with a [Rejection]: the gateway
 // sends its status and headers. The gateway also rejects requests
-// itself: with the secure defaults (see below), and with 404 Not Found when
-// no route matches.
+// itself: with the secure defaults (see below), with 404 Not Found when
+// no route matches, with 413 Content Too Large at the route match for
+// a body over the limit ([ReasonBodyTooLarge]), and with 503 Service
+// Unavailable when an admission budget is full
+// ([ReasonAdmissionSaturated]).
 //
 // The source of a failure sets the status (ADR-0017, ADR-0023). The first
 // rule that applies counts:
@@ -155,6 +217,13 @@ type Route struct {
 //     applies to hooks, the upstream selector, the round trip, and the
 //     protocol switch. A canceled context alone does not change the status
 //     of another error.
+//   - 413 Content Too Large when the error wraps
+//     [ErrRequestBodyTooLarge] and the body limit of this request found the
+//     overflow, in each stage. The error alone does not give 413.
+//   - 400 Bad Request when the error wraps [ErrInvalidTrailerName] and the
+//     trailer check of this request rejected a name at the end of the body,
+//     in each stage (see "Request trailers"). The error alone does not give
+//     400.
 //   - 504 Gateway Timeout when the round trip fails with a [net.Error] whose
 //     Timeout method returns true, such as a dial, TLS-handshake, or
 //     response-header timeout, or [context.DeadlineExceeded].
@@ -171,9 +240,10 @@ type Route struct {
 //     middleware does not derive its context from the request context, so
 //     the gateway context is lost.
 //   - 502 Bad Gateway for another failure of the round trip, such as a
-//     connection failure or response headers that are too large, and for a
-//     failure without a known source, such as an upstream that does not
-//     accept a protocol switch.
+//     connection failure, response headers that are too large, or a denial
+//     by an [EgressTransport] ([ErrEgressDenied]), and for a failure without
+//     a known source, such as an upstream that does not accept a protocol
+//     switch.
 //
 // The gateway never reads the text of an error. A [Renderer] makes the body
 // of these responses; it gets no failure details. The gateway does not send
@@ -182,6 +252,11 @@ type Route struct {
 // connection for a protocol switch. It also sends none when the connection is
 // hijacked already ([net/http.ErrHijacked]), because another component owns
 // it; completion still gets the failure.
+//
+// A read error other than io.EOF from the final response body, after the
+// response hooks, is a [Failure] in [PhaseResponseBody]. It keeps the original
+// error, also after the response is committed. Response-write failures are
+// observations of middleware and are not recorded by this reader.
 //
 // Completion gets the failure, with its phase, as a [Failure], and the
 // transport facts [Completion.ConnectionObtained] and
@@ -195,16 +270,21 @@ type Route struct {
 //
 //   - CONNECT requests, with 501 Not Implemented.
 //   - Request targets that do not have the origin form, with 400 Bad Request.
-//     This includes the absolute form ("GET http://host/path") and the
-//     asterisk form ("OPTIONS *").
-//   - Paths with a dot-segment, a backslash or "#", or a percent-encoded ".",
-//     "/", "\", NUL, or "#", with 400 Bad Request.
+//     This includes the absolute form ("GET http://host/path"), unless
+//     [Config.AllowAbsoluteForm] relaxes it, the asterisk form
+//     ("OPTIONS *"), and a target with a fragment: an unescaped "#" anywhere
+//     in the target ("GET /path#y", "GET /path?x#y"), which
+//     [net/url.ParseRequestURI] keeps in the path or the raw query. "%23" is
+//     not a fragment.
+//   - Paths with a dot-segment or a backslash, or a percent-encoded ".", "/",
+//     "\", NUL, or "#", with 400 Bad Request.
 //   - Queries that [net/url.ParseQuery] rejects, with 400 Bad Request: a ";",
 //     a malformed percent-escape, or more than 10000 parameters. Middleware
 //     reads the query with the same parser, so it sees the same parameters as
-//     the upstream.
+//     the upstream. [QueryUnchecked] relaxes this check.
 //   - Header and trailer names with characters other than ASCII letters,
-//     digits, and "-", with 400 Bad Request.
+//     digits, and "-", with 400 Bad Request. [HeaderNameDrop] removes these
+//     names instead.
 //   - A Connection header with the token "upgrade" and an Upgrade value
 //     that is not printable ASCII, with 400 Bad Request.
 //
@@ -217,12 +297,13 @@ type Route struct {
 //   - The headers in [Config.ManagedHeaders] and the headers that
 //     [HeaderOwner] values declare.
 //
-// It also removes these names from the inbound request trailers. Middleware
-// and hooks can set these headers again, and they go to the upstream. The
-// gateway sets X-Forwarded-For, X-Forwarded-Host, and X-Forwarded-Proto from
-// the direct peer. It does not trust forwarding headers from other proxies. It
-// also removes the names of these headers from the inbound Connection header,
-// so a client cannot make the proxy remove a header that middleware set.
+// It also removes these names from the inbound request trailers (see
+// "Request trailers"). Middleware and hooks can set these headers again, and
+// they go to the upstream. The gateway sets X-Forwarded-For,
+// X-Forwarded-Host, and X-Forwarded-Proto from the direct peer. It does not
+// trust forwarding headers from other proxies. It also removes the names of
+// these headers from the inbound Connection header, so a client cannot make
+// the proxy remove a header that middleware set.
 //
 // The gateway removes hop-by-hop headers in both directions. It removes
 // Alt-Svc and hop-by-hop fields from responses, informational (1xx) responses,
@@ -230,6 +311,14 @@ type Route struct {
 // Protocols, so protocol upgrades work. Response headers that middleware set
 // before the upstream responds are not sent in informational responses, and
 // they stay in the final response.
+//
+// The gateway limits request bodies to [DefaultBodyLimit] when
+// [Config.BodyLimit] is omitted (see [BodyLimit]).
+//
+// The relaxations ([Config.QueryPolicy], [Config.HeaderNamePolicy], and
+// [Config.AllowAbsoluteForm]) apply to the complete gateway, because the
+// checks protect the routing itself (ADR-0026). The other checks above,
+// including the path policy, cannot be relaxed.
 //
 // The gateway does not change the request that the caller gave to ServeHTTP.
 // Middleware must also not change it (see [Middleware]).
@@ -248,8 +337,9 @@ type Route struct {
 //   - A header or trailer name with characters other than ASCII letters,
 //     digits, and "-", or a header value with a control character other than
 //     horizontal tab, is a failure in [PhaseBeforeUpstream]. The gateway
-//     does not call the transport. The trailer values arrive while the body
-//     streams, so the gateway cannot check them.
+//     does not call the transport. The trailer values that a client sends
+//     arrive at the end of the body; the gateway checks them then (see
+//     "Request trailers").
 //
 // After the [UpstreamResponseHook] hooks, the gateway applies these rules to
 // a final response:
@@ -276,14 +366,63 @@ type Route struct {
 // A hook that changes the status of a 101 response, or changes another status
 // to one outside 200 to 599, causes a failure in [PhaseUpstreamResponse].
 //
+// # Request trailers
+//
+// The request that the global middleware gets has its own trailer map, with
+// the declared trailer names that the secure defaults keep (ADR-0027). When a
+// read of the body returns [io.EOF], also with data in the same call, the
+// gateway checks the trailers that arrived with the body, also the names that
+// the request did not declare:
+//
+//   - A name with characters other than ASCII letters, digits, and "-": with
+//     [HeaderNameReject], the read returns an error that wraps
+//     [ErrInvalidTrailerName] instead of io.EOF, and no trailer is published;
+//     with [HeaderNameDrop], the field is removed.
+//   - Identity headers and managed headers, hop-by-hop fields (also names
+//     in the inbound Connection options), Alt-Svc, and
+//     the fields that a trailer must not contain (RFC 9110, section 6.5.1)
+//     are removed: framing (Content-Length, Transfer-Encoding, Trailer),
+//     Host, authentication (Authorization, Proxy-Authorization,
+//     Www-Authenticate, Proxy-Authenticate, Realm, Cookie, Set-Cookie),
+//     request modifiers (Cache-Control, Pragma, Expect, Max-Forwards, Range,
+//     and each field whose name starts with "If-"), and content format
+//     (Content-Type, Content-Encoding, Content-Range).
+//
+// The gateway then sets the other fields in the trailer map of the request
+// that the global middleware got, and in the trailer map of the request that
+// the transport gets when that request still has the body of the gateway and
+// a trailer map. So middleware that replaces the body, or sets the trailer
+// map to nil, forwards no client trailers. Each map gets its own copy of the
+// values. The gateway does not replace a value that middleware set, and does
+// not add back a declared name that middleware deleted. The
+// writes run on the goroutine that read the end of the body: read the
+// trailers only after the read that returned io.EOF, as [http.Request]
+// requires. A read that fails, a truncated body, and a body over the limit
+// publish no trailers, and Close does not read the body to find them. The
+// transport sends the trailers that its protocol can send. HTTP/2 servers
+// keep only declared trailers. A request copied before EOF also gets the
+// checked values when it still has the gateway body. When the upstream
+// responds before the end of the body and the transport continues to read
+// it, the same check applies, but a rejected name only ends the upload: the
+// gateway does not replace the response.
+//
+// On HTTP/1.1, net/http writes the trailers to the Trailer map of the request
+// that its server made. When that map is nil, net/http makes a new map that
+// only its own request has. So the gateway gets the trailers that the request
+// did not declare only when ServeHTTP gets the request of the server, or a
+// copy that shares a Trailer map that is not nil with it. [Server] makes such
+// a map. Middleware in front of the gateway that copies a request without a
+// trailer map, such as with [http.Request.WithContext], loses these
+// trailers: they reach neither middleware nor the upstream.
+//
 // # Deviations from HTTP specifications
 //
 // These secure defaults deliberately differ from the HTTP specifications:
 //
 //   - RFC 9112, section 3.2.2, says that a server must accept the absolute
-//     form. The gateway rejects it, because the authority in the request
-//     target can disagree with the Host header that the routing and the
-//     upstream use.
+//     form. The gateway rejects it by default, because the authority in the
+//     request target can disagree with the Host header that the client
+//     sent. [Config.AllowAbsoluteForm] accepts it.
 //   - RFC 9110, section 5.1, permits other token characters in header names,
 //     such as "_" and ".". The gateway rejects them, because some upstreams
 //     read "X_User" and "X-User" as the same header.
@@ -308,12 +447,24 @@ type Gateway struct {
 	managedHeaders map[string]struct{}
 	ownedTransport *http.Transport
 	renderer       Renderer
+
+	// bodyLimit is the gateway limit, or noBodyLimit.
+	bodyLimit int64
+
+	admission        *AdmissionBudget
+	queryPolicy      QueryPolicy
+	headerNamePolicy HeaderNamePolicy
+	absoluteForm     bool
 }
 
 // route is a validated route with its compiled handler.
 type route struct {
 	prefix  string
 	handler http.Handler
+
+	// bodyLimit is the effective limit of the route, or noBodyLimit.
+	bodyLimit int64
+	admission *AdmissionBudget
 }
 
 // lostContextLog records that middleware did not derive its context from the
@@ -337,7 +488,11 @@ var lostContextLog = safelog.New("gateway_context_lost")
 // as the default logger.
 func New(cfg Config) (*Gateway, error) {
 	g := &Gateway{
-		renderer: cfg.Renderer,
+		renderer:         cfg.Renderer,
+		admission:        cfg.Admission,
+		queryPolicy:      cfg.QueryPolicy,
+		headerNamePolicy: cfg.HeaderNamePolicy,
+		absoluteForm:     cfg.AllowAbsoluteForm,
 	}
 	if g.renderer == nil {
 		g.renderer = renderProblem
@@ -348,6 +503,8 @@ func New(cfg Config) (*Gateway, error) {
 	if len(problems) != 0 {
 		return nil, errors.Join(problems...)
 	}
+
+	g.bodyLimit = cfg.BodyLimit.resolve(DefaultBodyLimit)
 
 	transport := cfg.Transport
 	if transport == nil {
@@ -380,18 +537,19 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		g.complete(ctx, rc, !returned)
 	}()
 
-	if status, reason := checkRequest(r); status != 0 {
-		rc.reject(status, reason, nil)
-		g.respond(ctx, w, rc)
+	if status, reason := g.checkRequest(r); status != 0 {
+		g.rejectRequest(ctx, w, rc, status, reason)
 		returned = true
 
 		return
 	}
 
-	// WithContext makes a shallow copy. stripHeaders gives it its own maps
-	// when it removes headers.
+	// WithContext makes a shallow copy. toOriginForm gives it its own URL, and
+	// stripHeaders its own maps.
 	inner := r.WithContext(ctx)
+	toOriginForm(inner)
 	g.stripHeaders(inner)
+	rc.body = g.wrapBody(r, inner)
 	g.handler.ServeHTTP(w, inner)
 	returned = true
 }
@@ -435,8 +593,10 @@ func (g *Gateway) buildHandler(cfg Config, proxy *httputil.ReverseProxy) (http.H
 		}
 
 		routes = append(routes, route{
-			prefix:  r.Prefix,
-			handler: handler,
+			prefix:    r.Prefix,
+			handler:   handler,
+			bodyLimit: r.BodyLimit.resolve(g.bodyLimit),
+			admission: r.Admission,
 		})
 	}
 
@@ -453,13 +613,23 @@ func (g *Gateway) buildHandler(cfg Config, proxy *httputil.ReverseProxy) (http.H
 	return handler, problems
 }
 
-// router runs the RequestReceived hooks and then calls the first route whose
-// prefix matches, so routes must be sorted with the longest prefix first.
+// router takes the gateway admission slot, runs the RequestReceived hooks,
+// and then calls the first route whose prefix matches, so routes must be
+// sorted with the longest prefix first.
 func (g *Gateway) router(routes []route) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rc, ok := g.requestContext(w, r)
 		if !ok {
 			return
+		}
+
+		if g.admission != nil {
+			if !g.admit(w, r, rc, g.admission) {
+				return
+			}
+
+			// A deferred release also runs during a panic, which continues.
+			defer g.admission.release()
 		}
 
 		for _, hook := range g.hooks.received {
@@ -472,18 +642,76 @@ func (g *Gateway) router(routes []route) http.Handler {
 		}
 
 		path := r.URL.EscapedPath()
-		for _, rt := range routes {
-			if strings.HasPrefix(path, rt.prefix) {
-				rc.route = rt.prefix
-				rt.handler.ServeHTTP(w, r)
+		for i := range routes {
+			if strings.HasPrefix(path, routes[i].prefix) {
+				rc.route = routes[i].prefix
+				g.serveRoute(w, r, rc, &routes[i])
 
 				return
 			}
 		}
 
-		rc.reject(http.StatusNotFound, ReasonNoRoute, nil)
-		g.respond(r.Context(), w, rc)
+		g.rejectRequest(r.Context(), w, rc, http.StatusNotFound, ReasonNoRoute)
 	})
+}
+
+// serveRoute applies the route body limit and takes the route admission
+// slot before the route middleware runs.
+func (g *Gateway) serveRoute(w http.ResponseWriter, r *http.Request, rc *RequestContext, rt *route) {
+	if !rc.admitBody(r, rt.bodyLimit) {
+		g.rejectRequest(r.Context(), w, rc, http.StatusRequestEntityTooLarge, ReasonBodyTooLarge)
+
+		return
+	}
+
+	if rt.admission != nil {
+		if !g.admit(w, r, rc, rt.admission) {
+			return
+		}
+
+		defer rt.admission.release()
+	}
+
+	rt.handler.ServeHTTP(w, r)
+}
+
+// admit takes a slot of b. When no slot is free, it rejects the request and
+// reports false. The caller releases the slot.
+func (g *Gateway) admit(w http.ResponseWriter, r *http.Request, rc *RequestContext, b *AdmissionBudget) bool {
+	if b.tryAcquire() {
+		return true
+	}
+
+	g.rejectRequest(r.Context(), w, rc, http.StatusServiceUnavailable, ReasonAdmissionSaturated)
+
+	return false
+}
+
+// rejectRequest records a core rejection and sends its response. ctx must
+// carry rc.
+func (g *Gateway) rejectRequest(ctx context.Context, w http.ResponseWriter, rc *RequestContext, status int, reason RejectionReason) {
+	rc.reject(status, reason, nil)
+	g.respond(ctx, w, rc)
+}
+
+// wrapBody gives inner, a shallow copy of source, a body with the gateway
+// limit and the trailer check, and returns that body. It keeps a nil body and
+// http.NoBody, which have no bytes and no trailers, and then returns nil.
+func (g *Gateway) wrapBody(source, inner *http.Request) *requestBody {
+	if inner.Body == nil || inner.Body == http.NoBody {
+		return nil
+	}
+
+	// The trailers that arrive with the body go to this map, also when the
+	// request declared none.
+	if inner.Trailer == nil {
+		inner.Trailer = make(http.Header)
+	}
+
+	body := g.newRequestBody(source, inner, g.bodyLimit)
+	inner.Body = body
+
+	return body
 }
 
 // requestContext fails closed when middleware did not derive its context from

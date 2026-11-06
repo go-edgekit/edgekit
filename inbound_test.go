@@ -62,6 +62,23 @@ func TestSecureDefaultsRejectBeforeMiddleware(t *testing.T) {
 			reason: edgekit.ReasonInvalidRequestTarget,
 		},
 		{
+			name:   "fragment after the query",
+			target: "/api/x?y#fragment",
+			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidRequestTarget,
+		},
+		{
+			name:   "fragment after an empty query",
+			target: "/api/x?#fragment",
+			status: http.StatusBadRequest,
+			reason: edgekit.ReasonInvalidRequestTarget,
+		},
+		{
+			name:   "escaped number sign in the query",
+			target: "/api/x?y=%23",
+			status: http.StatusOK,
+		},
+		{
 			name:   "absolute form with user information",
 			target: "http://user@upstream.test/api/x",
 			status: http.StatusBadRequest,
@@ -174,10 +191,10 @@ func TestSecureDefaultsRejectBeforeMiddleware(t *testing.T) {
 			reason: edgekit.ReasonInvalidPath,
 		},
 		{
-			name:   "number sign",
+			name:   "fragment in the path",
 			target: "/api/a#b",
 			status: http.StatusBadRequest,
-			reason: edgekit.ReasonInvalidPath,
+			reason: edgekit.ReasonInvalidRequestTarget,
 		},
 		{
 			name:   "dots in a name",
