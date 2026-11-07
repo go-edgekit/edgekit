@@ -35,7 +35,11 @@ func TestNonPrintableUpgradeIsRejected(t *testing.T) {
 			var requests atomic.Int32
 			upstream := countingUpstream(t, &requests)
 			completionHooks, completed := completions()
-			server := hookServer(t, upstream.URL, completionHooks)
+			server := hookServer(t, upstream.URL, edgekit.Hooks{
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					completionHooks,
+				},
+			})
 
 			status, _, reader, _ := responseHead(t, server, "GET /api/echo HTTP/1.1\r\n"+
 				"Host: gateway.test\r\n"+
@@ -85,12 +89,18 @@ func TestMiddlewareUpgradeValueFails(t *testing.T) {
 		})
 	}
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:     "/api/",
-			Upstream:   static(t, upstream.URL),
-			Middleware: []edgekit.Middleware{middleware},
-		}},
-		Hooks: []any{completionHooks},
+		Routes: []edgekit.Route{
+			{
+				Prefix:     "/api/",
+				Upstream:   static(t, upstream.URL),
+				Middleware: []edgekit.Middleware{middleware},
+			},
+		},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				completionHooks,
+			},
+		},
 	})
 
 	w := httptest.NewRecorder()
@@ -137,10 +147,12 @@ func TestUpgradeBodyNotWritable(t *testing.T) {
 		})
 		completionHooks, completed := completions()
 		g := newGateway(t, edgekit.Config{
-			Routes: []edgekit.Route{{
-				Prefix:   "/api/",
-				Upstream: static(t, "http://upstream.test"),
-			}},
+			Routes: []edgekit.Route{
+				{
+					Prefix:   "/api/",
+					Upstream: static(t, "http://upstream.test"),
+				},
+			},
 			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 				return &http.Response{
 					StatusCode: http.StatusSwitchingProtocols,
@@ -149,7 +161,14 @@ func TestUpgradeBodyNotWritable(t *testing.T) {
 					Request:    r,
 				}, nil
 			}),
-			Hooks: []any{completionHooks, hooks},
+			Hooks: edgekit.Hooks{
+				UpstreamResponse: []edgekit.UpstreamResponseHook{
+					hooks,
+				},
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					completionHooks,
+				},
+			},
 		})
 
 		w := httptest.NewRecorder()
@@ -198,7 +217,14 @@ func TestUpgradeBodyNotWritable(t *testing.T) {
 				return nil, nil
 			})
 			completionHooks, completed := completions()
-			server := hookServer(t, upstream.URL, completionHooks, hooks)
+			server := hookServer(t, upstream.URL, edgekit.Hooks{
+				UpstreamResponse: []edgekit.UpstreamResponseHook{
+					hooks,
+				},
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					completionHooks,
+				},
+			})
 
 			status, _, _, _ := responseHead(t, server, upgradeRequest)
 
@@ -280,12 +306,18 @@ func TestHijackFailureStatus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			completionHooks, completed := completions()
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, upstream.URL),
-				}},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, upstream.URL),
+					},
+				},
 				Transport: testTransport(t),
-				Hooks:     []any{completionHooks},
+				Hooks: edgekit.Hooks{
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						completionHooks,
+					},
+				},
 			})
 
 			ctx, cancel := context.WithCancel(t.Context())
@@ -386,12 +418,18 @@ func TestFailureAfterHijackIsNotRendered(t *testing.T) {
 	rendered := false
 	completionHooks, completed := completions()
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		Transport: testTransport(t),
-		Hooks:     []any{completionHooks},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				completionHooks,
+			},
+		},
 		Renderer: func(context.Context, edgekit.Problem) (string, []byte) {
 			rendered = true
 
@@ -453,11 +491,17 @@ func TestResponseHookNilBody(t *testing.T) {
 				return nil, tc.err
 			})
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, upstream.URL),
-				}},
-				Hooks: []any{hooks},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, upstream.URL),
+					},
+				},
+				Hooks: edgekit.Hooks{
+					UpstreamResponse: []edgekit.UpstreamResponseHook{
+						hooks,
+					},
+				},
 			})
 
 			w := httptest.NewRecorder()
@@ -515,12 +559,18 @@ func TestHijackedConnectionGetsNoResponse(t *testing.T) {
 	renders := 0
 	completionHooks, completed := completions()
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		Transport: testTransport(t),
-		Hooks:     []any{completionHooks},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				completionHooks,
+			},
+		},
 		Renderer: func(context.Context, edgekit.Problem) (string, []byte) {
 			renders++
 
@@ -641,10 +691,12 @@ func TestFailedProtocolSwitchClosesUpstreamBody(t *testing.T) {
 			upstream := upgradeUpstream(t, "Connection: Upgrade\r\nUpgrade: "+tc.protocol+"\r\n")
 			transport, closed := trackingTransport(t)
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, upstream.URL),
-				}},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, upstream.URL),
+					},
+				},
 				Transport: transport,
 			})
 

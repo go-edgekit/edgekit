@@ -7,8 +7,41 @@ import (
 	"slices"
 )
 
+// Hooks holds the lifecycle hooks of a gateway, one list for each phase. Use
+// it in [Config.Hooks] to set the execution order of each phase
+// independently. The zero value has no hooks.
+//
+// Each list runs serially in its written order. A value in more than one list
+// runs in each of those phases. Repeated entries run once per occurrence. A
+// rejection or error stops the later hooks of that processing phase; completion
+// still runs as described by [RequestCompletedHook].
+//
+// [New] copies the lists, but shares their values between concurrent requests.
+// Each value must be safe for concurrent use. Keep request state in
+// [RequestContext], not in the hook. [New] rejects nil entries, including typed
+// nil entries, with [ErrInvalidConfiguration]. Nil and empty lists are valid.
+// Registration does not declare managed headers; use [Config.HeaderOwners].
+// Hooks are trusted code and must obey the contract of each phase.
+type Hooks struct {
+	// RequestReceived lists the hooks that run after global middleware and
+	// before routing.
+	RequestReceived []RequestReceivedHook
+
+	// BeforeUpstream lists the hooks that run after the outbound rewrite and
+	// before the transport.
+	BeforeUpstream []BeforeUpstreamHook
+
+	// UpstreamResponse lists the hooks that run before the final upstream
+	// response is sent.
+	UpstreamResponse []UpstreamResponseHook
+
+	// RequestCompleted lists the hooks that run after gateway-managed handling
+	// ends.
+	RequestCompleted []RequestCompletedHook
+}
+
 // RequestReceivedHook is a lifecycle hook that runs after the global
-// middleware and before route matching. Register it in [Config.Hooks].
+// middleware and before route matching. Register it in [Hooks.RequestReceived].
 //
 // ctx is the context of the request that the global middleware passed on, and
 // r is that request. The hook must not change r or read its body.
@@ -36,16 +69,15 @@ func (f RequestReceivedHookFunc) RequestReceived(ctx context.Context, rc *Reques
 
 // BeforeUpstreamHook is a lifecycle hook that runs after the route middleware,
 // the upstream selection, and the rewrite of the outbound request, before the
-// transport sends it. Register it in [Config.Hooks]. Use it, for example, to
+// transport sends it. Register it in [Hooks.BeforeUpstream]. Use it, for example, to
 // sign the outbound request.
 //
 // out gives the rewritten outbound request. The hook can change only its
 // header map, so the hook cannot change the destination. The gateway then
 // applies the rules in the [Gateway] documentation to the header map. The hook
 // runs once for each request, not once for each connection attempt of the
-// transport. Register a provider that signs header fields after the providers
-// that change those fields, so it is closer to the upstream (see
-// [Config.Hooks]).
+// transport. In [Hooks.BeforeUpstream], register a hook that signs header
+// fields after the hooks that change those fields.
 //
 // The result of BeforeUpstream follows the rules of [Rejection]. After a
 // rejection or an error, the later hooks of the phase do not run, and the
@@ -70,7 +102,7 @@ func (f BeforeUpstreamHookFunc) BeforeUpstream(ctx context.Context, rc *RequestC
 
 // UpstreamResponseHook is a lifecycle hook that runs after the upstream
 // response headers arrive and before the gateway sends the final headers to
-// the client. Register it in [Config.Hooks]. Use it, for example, to add
+// the client. Register it in [Hooks.UpstreamResponse]. Use it, for example, to add
 // response headers.
 //
 // The hook does not run for responses that the gateway or middleware make, or
@@ -128,7 +160,7 @@ var ErrInvalidUpstreamResponse = errors.New("invalid upstream response")
 // RequestCompletedHook is a lifecycle hook that runs once for each request,
 // at completion: after the gateway-managed handler chain returned or finished
 // unwinding, also during a panic, and after a rejection by the secure
-// defaults. Register it in [Config.Hooks].
+// defaults. Register it in [Hooks.RequestCompleted].
 //
 // ctx is the context that the gateway got with the request, together with the
 // gateway context. It is not a context that middleware derived, and it can be
@@ -152,84 +184,58 @@ func (f RequestCompletedHookFunc) RequestCompleted(ctx context.Context, rc *Requ
 	f(ctx, rc, c)
 }
 
-// HeaderOwner is an optional interface for a value in [Config.Hooks]. It
-// declares the managed headers that an extension owns, such as a header that
-// tells the upstream the authenticated caller.
+// HeaderOwner declares the managed headers that an extension owns, such as a
+// header that tells the upstream the authenticated caller. Register it in
+// [Config.HeaderOwners], independently of lifecycle hooks.
 //
 // The gateway removes these headers from inbound requests together with the
 // headers in [Config.ManagedHeaders], so only middleware and hooks can set
-// them. [New] calls ManagedHeaders one time. The names must obey the rules of
-// [Config.ManagedHeaders].
+// them. [New] calls ManagedHeaders once for each entry in
+// [Config.HeaderOwners]. The names must obey the rules of
+// [Config.ManagedHeaders], so a declaration cannot contain a hop-by-hop,
+// framing, or Host header. New copies the names and does not retain the
+// returned slice.
+//
+// Registration in [Config.Hooks] does not declare headers. If an owner is not
+// in [Config.HeaderOwners], the gateway does not remove client values of its
+// headers, unless another declaration contains them. An extension that
+// implements HeaderOwner must tell its users to register it there.
 type HeaderOwner interface {
 	ManagedHeaders() []string
 }
 
-// hooks holds the compiled hook lists in run order: the request phases in
-// registration order, and the response phases in reverse order (ADR-0021).
-type hooks struct {
+// compiledHooks holds independent phase lists in execution order (ADR-0030).
+type compiledHooks struct {
 	received  []RequestReceivedHook
 	before    []BeforeUpstreamHook
 	responses []UpstreamResponseHook
 	completed []RequestCompletedHook
 }
 
-// compileHooks does not call hook methods, except ManagedHeaders.
-func compileHooks(providers []any) (hooks, [][]string, []error) {
-	var (
-		compiled hooks
-		problems []error
-	)
+// compileHooks copies the lists without calling hook methods.
+func compileHooks(h Hooks) (compiledHooks, []error) {
+	var problems []error
+	problems = append(problems, checkHookList(h.RequestReceived, "request received")...)
+	problems = append(problems, checkHookList(h.BeforeUpstream, "before upstream")...)
+	problems = append(problems, checkHookList(h.UpstreamResponse, "upstream response")...)
+	problems = append(problems, checkHookList(h.RequestCompleted, "request completed")...)
 
-	// declared has one entry for each provider, so the index is the location
-	// in errors.
-	declared := make([][]string, len(providers))
+	return compiledHooks{
+		received:  slices.Clone(h.RequestReceived),
+		before:    slices.Clone(h.BeforeUpstream),
+		responses: slices.Clone(h.UpstreamResponse),
+		completed: slices.Clone(h.RequestCompleted),
+	}, problems
+}
 
-	for i, provider := range providers {
-		if isNilValue(provider) {
-			problems = append(problems, invalid("hooks %d: is nil", i))
-
-			continue
-		}
-
-		found := false
-		if hook, ok := provider.(RequestReceivedHook); ok {
-			compiled.received = append(compiled.received, hook)
-			found = true
-		}
-
-		if hook, ok := provider.(BeforeUpstreamHook); ok {
-			compiled.before = append(compiled.before, hook)
-			found = true
-		}
-
-		if hook, ok := provider.(UpstreamResponseHook); ok {
-			compiled.responses = append(compiled.responses, hook)
-			found = true
-		}
-
-		if hook, ok := provider.(RequestCompletedHook); ok {
-			compiled.completed = append(compiled.completed, hook)
-			found = true
-		}
-
-		if owner, ok := provider.(HeaderOwner); ok {
-			declared[i] = owner.ManagedHeaders()
-			found = true
-		}
-
-		if !found {
-			problems = append(problems, invalid("hooks %d: %w", i, errNoHook))
+// checkHookList reports every nil entry without calling hook methods.
+func checkHookList[T any](list []T, phase string) []error {
+	var problems []error
+	for i, hook := range list {
+		if isNilValue(hook) {
+			problems = append(problems, invalid("hooks: %s %d: is nil", phase, i))
 		}
 	}
 
-	// The response phases go back from the upstream to the client, so the
-	// innermost provider runs first.
-	slices.Reverse(compiled.responses)
-	slices.Reverse(compiled.completed)
-
-	return compiled, declared, problems
+	return problems
 }
-
-// errNoHook describes a hook provider that implements no interface of a
-// lifecycle hook or of HeaderOwner.
-var errNoHook = errors.New("implements no hook interface and not HeaderOwner")

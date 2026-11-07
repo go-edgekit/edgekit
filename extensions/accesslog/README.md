@@ -4,7 +4,7 @@ A bundled extension that makes one access-log record for each request. It uses o
 
 ## Registration
 
-Register one `Recorder` as the first global middleware and as the first hook provider. Put tracing middleware outside it:
+Register one `Recorder` as global middleware, in its three hook phases, and as a header owner. Put tracing middleware outside it. In `BeforeUpstream`, put the recorder before hooks that read, change, or sign `X-Request-ID`; other hooks can get the ID with `Recorder.RequestID` at any position. Put the recorder last in `UpstreamResponse` and `RequestCompleted`. Each list runs in its written order ([ADR-0030](../../docs/adr/0030-typed-hook-phase-lists.md)):
 
 ```go
 recorder, err := accesslog.New(accesslog.Config{
@@ -17,8 +17,23 @@ if err != nil {
 
 gateway, err := edgekit.New(edgekit.Config{
     Middleware: []edgekit.Middleware{tracing, recorder.Middleware},
-    Hooks:      []any{recorder, signer},
-    Routes:     routes,
+    Hooks: edgekit.Hooks{
+        BeforeUpstream: []edgekit.BeforeUpstreamHook{
+            recorder,
+            signer,
+        },
+        UpstreamResponse: []edgekit.UpstreamResponseHook{
+            recorder,
+        },
+        RequestCompleted: []edgekit.RequestCompletedHook{
+            recorder,
+        },
+    },
+    HeaderOwners: []edgekit.HeaderOwner{
+        recorder,
+        signer,
+    },
+    Routes: routes,
 })
 ```
 
@@ -28,6 +43,8 @@ Tracing middleware: makes the span context
     Other middleware, routing, hooks, proxy
 Completion: the recorder reports after the middleware returned
 ```
+
+The recorder cannot detect a missing registration. Without `RequestCompleted`, the sink gets no records. Without the middleware, records have `Observed` false. Without `BeforeUpstream`, the upstream gets no request ID. Without `UpstreamResponse`, `UpstreamStatus` is always 0. Without the header-owner registration, middleware and hooks that run before the recorder can see the `X-Request-ID` values of the client. The package documentation lists each effect.
 
 ## Records
 

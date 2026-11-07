@@ -1055,7 +1055,11 @@ func dialFallback(t *testing.T, refuse func(address string) bool) fallbackResult
 			},
 		},
 		Transport: transport,
-		Hooks:     []any{collector},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				collector,
+			},
+		},
 	})
 
 	g.ServeHTTP(got.recorder, httptest.NewRequest(http.MethodGet, "/api/", nil))
@@ -1184,7 +1188,11 @@ func TestEgressCancellationAndDeadline(t *testing.T) {
 					},
 				},
 				Transport: transport,
-				Hooks:     []any{collector},
+				Hooks: edgekit.Hooks{
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						collector,
+					},
+				},
 			})
 
 			w := httptest.NewRecorder()
@@ -1228,7 +1236,11 @@ func TestEgressCancellationAndDeadline(t *testing.T) {
 				},
 			},
 			Transport: transport,
-			Hooks:     []any{collector},
+			Hooks: edgekit.Hooks{
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					collector,
+				},
+			},
 		})
 
 		ctx, cancel := context.WithCancel(t.Context())
@@ -1439,7 +1451,11 @@ func TestEgressPreservesHTTPAndTLSIdentityAndReusesConnections(t *testing.T) {
 					},
 				},
 				Transport: transport,
-				Hooks:     []any{collector},
+				Hooks: edgekit.Hooks{
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						collector,
+					},
+				},
 			})
 
 			for range 3 {
@@ -1572,14 +1588,16 @@ func TestEgressDenialIsAFailureAtCompletion(t *testing.T) {
 				},
 				Transport:  transport,
 				Middleware: []edgekit.Middleware{unwinding(&unwound)},
-				Hooks: []any{
-					edgekit.RequestCompletedHookFunc(func(ctx context.Context, rc *edgekit.RequestContext, c edgekit.Completion) {
-						if !unwound {
-							t.Error("RequestCompleted() ran before the middleware unwound")
-						}
+				Hooks: edgekit.Hooks{
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						edgekit.RequestCompletedHookFunc(func(ctx context.Context, rc *edgekit.RequestContext, c edgekit.Completion) {
+							if !unwound {
+								t.Error("RequestCompleted() ran before the middleware unwound")
+							}
 
-						collector(ctx, rc, c)
-					}),
+							collector(ctx, rc, c)
+						}),
+					},
 				},
 			})
 
@@ -1692,7 +1710,11 @@ func TestDialErrorStatus(t *testing.T) {
 				Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 					return nil, dialErr
 				}),
-				Hooks: []any{collector},
+				Hooks: edgekit.Hooks{
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						collector,
+					},
+				},
 			})
 
 			ctx, cancel := context.WithCancel(t.Context())

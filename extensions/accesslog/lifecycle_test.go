@@ -56,7 +56,18 @@ func TestRepeatedMiddlewareKeepsOneObservation(t *testing.T) {
 				})
 			},
 		},
-		Hooks: []any{
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				recorder,
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				recorder,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				recorder,
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
 			recorder,
 		},
 		Routes: []edgekit.Route{
@@ -152,11 +163,22 @@ func TestRequestIDEndsAtCompletion(t *testing.T) {
 						})
 					},
 				},
-				Hooks: []any{
+				Hooks: edgekit.Hooks{
+					BeforeUpstream: []edgekit.BeforeUpstreamHook{
+						recorder,
+					},
+					UpstreamResponse: []edgekit.UpstreamResponseHook{
+						recorder,
+					},
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						edgekit.RequestCompletedHookFunc(func(_ context.Context, rc *edgekit.RequestContext, _ edgekit.Completion) {
+							completionID, completionOK = recorder.RequestID(rc)
+						}),
+						recorder,
+					},
+				},
+				HeaderOwners: []edgekit.HeaderOwner{
 					recorder,
-					edgekit.RequestCompletedHookFunc(func(_ context.Context, rc *edgekit.RequestContext, _ edgekit.Completion) {
-						completionID, completionOK = recorder.RequestID(rc)
-					}),
 				},
 				Routes: []edgekit.Route{
 					apiRoute(t, "http://upstream.test"),
@@ -219,15 +241,26 @@ func TestRetainedRecordDoesNotChange(t *testing.T) {
 		Middleware: []edgekit.Middleware{
 			recorder.Middleware,
 		},
-		Hooks: []any{
-			recorder,
-			edgekit.BeforeUpstreamHookFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
-				if out.URL().Host == "first.test" {
-					return nil, firstErr
-				}
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				recorder,
+				edgekit.BeforeUpstreamHookFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+					if out.URL().Host == "first.test" {
+						return nil, firstErr
+					}
 
-				return nil, secondErr
-			}),
+					return nil, secondErr
+				}),
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				recorder,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				recorder,
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
+			recorder,
 		},
 		Routes: []edgekit.Route{
 			{

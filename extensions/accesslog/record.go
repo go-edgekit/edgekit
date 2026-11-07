@@ -88,10 +88,9 @@ type Record struct {
 
 	// UpstreamStatus is the status of the upstream response when the
 	// UpstreamResponse hook of the recorder ran, or 0 when no upstream
-	// response reached it. As the first hook provider, the recorder runs
-	// after the other UpstreamResponse hooks (ADR-0021): they can have
-	// changed the status, and when one of them rejects or fails, the hook of
-	// the recorder does not run and UpstreamStatus is 0.
+	// response reached it. Register the recorder last in UpstreamResponse
+	// to observe changes from earlier hooks. If an earlier hook rejects or
+	// fails, the recorder does not run and UpstreamStatus is 0.
 	UpstreamStatus int
 
 	// Completion holds the execution facts of the gateway, without changes.

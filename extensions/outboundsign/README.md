@@ -18,16 +18,25 @@ if err != nil {
 }
 
 gateway, err := edgekit.New(edgekit.Config{
-    Hooks: []any{recorder, signer}, // the signer is the last hook provider
-    Routes: []edgekit.Route{{
-        Prefix:     "/api/",
-        Upstream:   selector,
-        Middleware: []edgekit.Middleware{withKey},
-    }},
+    Hooks: edgekit.Hooks{
+        BeforeUpstream: []edgekit.BeforeUpstreamHook{
+            signer,
+        },
+    },
+    HeaderOwners: []edgekit.HeaderOwner{
+        signer,
+    },
+    Routes: []edgekit.Route{
+        {
+            Prefix:     "/api/",
+            Upstream:   selector,
+            Middleware: []edgekit.Middleware{withKey},
+        },
+    },
 })
 ```
 
-The route middleware gives the key to the hook through request state. One `Signer` can serve many routes with different keys. This is one way to give a hook route-specific settings; it does not decide between route bindings and route middleware ([roadmap](../../docs/roadmap.md), section 3).
+Put the signer last in `BeforeUpstream` so it signs the header changes of earlier hooks. Register it in `HeaderOwners` so the core removes client values of its managed header. The route middleware gives the key to the hook through request state. One `Signer` can serve many routes with different keys. This is one way to give a hook route-specific settings; it does not decide between route bindings and route middleware ([roadmap](../../docs/roadmap.md), section 3).
 
 ## Signature
 

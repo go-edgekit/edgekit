@@ -1,6 +1,6 @@
 # ADR-0021: Order hooks by the position of their provider
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0030](0030-typed-hook-phase-lists.md)
 - **Date:** 2026-11-04
 - **Decision owners:** Project maintainers
 - **Supersedes in part:** [ADR-0003](0003-proxy-lifecycle-hooks.md) and [ADR-0004](0004-compose-http-middleware-and-hooks.md) (the order of hooks in each phase)
@@ -50,3 +50,5 @@ Completion follows the same rule, although completion hooks only observe. An exc
 ## Validation / follow-up
 
 Tests verify the run order of each phase with two providers that take part in all phases, that an error stops only the later hooks in the run order, and that each completion hook gets its own snapshot when the hooks run in reverse order.
+
+**Superseded 2026-11-07:** [ADR-0030](0030-typed-hook-phase-lists.md) replaces provider-position registration with independent typed phase lists, each in execution order. Header-owner declarations are separate.

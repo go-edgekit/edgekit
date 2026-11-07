@@ -108,3 +108,5 @@ This replaces the plain-text status-text body of ADR-0017. The body still contai
 Tests verify the four result combinations in each processing phase, that an ignored invalid rejection does not replace the original failure, that an invalid rejection stops the later hooks without values in the failure or in diagnostics, each validation rule, that a shared rejection does not change, header removal on HTTP/1.1 and HTTP/2, the exact default body, `HEAD`, a custom renderer for each source, the fallback for an invalid content type, and no rendering after a commit through a write, a flush, or a hijack.
 
 The key-authentication extension must test a store failure and an unknown key separately. P2 of the threat model (equivalent rejections for missing and unknown keys) is a separate requirement of that extension.
+
+**Run order 2026-11-07:** [ADR-0030](0030-typed-hook-phase-lists.md) supersedes ADR-0021. A rejection stops the hooks that come after it in the written order of its phase list.

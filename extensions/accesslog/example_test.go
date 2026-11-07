@@ -50,18 +50,32 @@ func ExampleNew() {
 		return
 	}
 
-	// The recorder is the first middleware and the first hook provider.
+	// The recorder observes the inner middleware and registers each hook
+	// phase and its managed headers separately.
 	gateway, err := edgekit.New(edgekit.Config{
 		Middleware: []edgekit.Middleware{
 			recorder.Middleware,
 		},
-		Hooks: []any{
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				recorder,
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				recorder,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				recorder,
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
 			recorder,
 		},
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: selector,
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: selector,
+			},
+		},
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -116,13 +130,26 @@ func ExampleRecord_LogValue() {
 		Middleware: []edgekit.Middleware{
 			recorder.Middleware,
 		},
-		Hooks: []any{
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				recorder,
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				recorder,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				recorder,
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
 			recorder,
 		},
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: selector,
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: selector,
+			},
+		},
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -199,13 +226,26 @@ func ExampleSink() {
 		Middleware: []edgekit.Middleware{
 			recorder.Middleware,
 		},
-		Hooks: []any{
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				recorder,
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				recorder,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				recorder,
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
 			recorder,
 		},
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: selector,
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: selector,
+			},
+		},
 	})
 	if err != nil {
 		fmt.Println(err)

@@ -30,10 +30,12 @@ if err != nil {
 }
 
 gateway, err := edgekit.New(edgekit.Config{
-    Routes: []edgekit.Route{{
-        Prefix:   "/api/",
-        Upstream: upstream,
-    }},
+    Routes: []edgekit.Route{
+        {
+            Prefix:   "/api/",
+            Upstream: upstream,
+        },
+    },
 })
 if err != nil {
     return err
@@ -70,8 +72,11 @@ Middleware follows the `net/http` rule: it must not change the request that it g
 The extension points are:
 
 - **Middleware:** `func(http.Handler) http.Handler`, global or for each route.
+- **Lifecycle hooks:** `Config.Hooks` contains independent typed lists for `RequestReceived`, `BeforeUpstream`, `UpstreamResponse`, and `RequestCompleted`. Each list runs in its written order. See the testable [`ExampleHooks`](hooks_test.go).
 - **Upstream selector:** chooses the upstream URL for a matched request. `StaticUpstream` is the default. `UpstreamSelectorFunc` makes a selector from a function.
 - **Transport:** an `http.RoundTripper`. `NewTransport` gives the transport with the secure defaults. `NewEgressTransport` gives a transport that connects only to allowed origins and IP networks.
+
+A hook runs only in the phase lists that contain it. Register managed-header declarations separately in `Config.HeaderOwners []HeaderOwner`, or list the names directly in `Config.ManagedHeaders`. Hook registration alone does not declare headers ([ADR-0030](docs/adr/0030-typed-hook-phase-lists.md)).
 
 ## Bundled extensions
 

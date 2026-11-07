@@ -1,6 +1,6 @@
 # ADR-0029: Define the contract of the access-log extension
 
-- **Status:** Accepted
+- **Status:** Accepted (registration superseded in part by [ADR-0030](0030-typed-hook-phase-lists.md))
 - **Date:** 2026-11-06
 - **Decision owners:** Project maintainers
 - **Refines:** [ADR-0009](0009-outcomes-errors-and-early-responses.md), [ADR-0014](0014-multi-module-repository.md), and [ADR-0018](0018-completion-observes-gateway-rejections.md)
@@ -79,3 +79,5 @@ A function in the configuration reads the trace ID from the request context in t
 Tests verify the join of observations, facts, and trace IDs on HTTP/1.1 and HTTP/2; each gateway response and failure, including routing misses, body-limit and admission rejections, and `PhaseResponseBody`; panics; partial writes; flushes before completion; protocol switches with the management of the hardened server; concurrent records; the record without middleware; the pass-through outside a gateway; a sink panic; the fields of `LogValue`; and the optional interfaces of the response writer.
 
 The ownership of the request ID covers all parts of the response that the client gets. The `UpstreamResponse` hook removes the upstream values from the response headers and from the declared trailers. The response writer removes the ID from informational (1xx) responses other than 101 and sets it again for the final response. When the next handler returns, the middleware removes the trailer entries of the ID that `ReverseProxy` wrote with `http.TrailerPrefix`. Tests verify the 1xx response, a declared trailer, and an undeclared trailer on HTTP/1.1 and HTTP/2.
+
+**Registration superseded in part 2026-11-07:** [ADR-0030](0030-typed-hook-phase-lists.md) registers the recorder first in `BeforeUpstream`, last in `UpstreamResponse` and `RequestCompleted`, and separately in `HeaderOwners`. Middleware nesting and the observation contract do not change.

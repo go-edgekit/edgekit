@@ -214,7 +214,11 @@ func TestShutdownClosesUpgradedConnections(t *testing.T) {
 				Upstream: static(t, slow.URL),
 			},
 		},
-		Hooks: []any{completionHook},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				completionHook,
+			},
+		},
 	})
 	ts := startServer(t, g, edgekit.ServerConfig{}, serverOptions{})
 

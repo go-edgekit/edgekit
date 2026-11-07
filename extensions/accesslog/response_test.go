@@ -173,7 +173,18 @@ func inspectingGateway(t *testing.T, sink accesslog.Sink, inspect http.HandlerFu
 				return inspect
 			},
 		},
-		Hooks: []any{
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				recorder,
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				recorder,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				recorder,
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
 			recorder,
 		},
 		Routes: []edgekit.Route{
@@ -432,7 +443,18 @@ func TestResponseStatusesAndRequestID(t *testing.T) {
 				Middleware: []edgekit.Middleware{
 					recorder.Middleware,
 				},
-				Hooks: []any{
+				Hooks: edgekit.Hooks{
+					BeforeUpstream: []edgekit.BeforeUpstreamHook{
+						recorder,
+					},
+					UpstreamResponse: []edgekit.UpstreamResponseHook{
+						recorder,
+					},
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						recorder,
+					},
+				},
+				HeaderOwners: []edgekit.HeaderOwner{
 					recorder,
 				},
 				Routes: []edgekit.Route{
@@ -647,7 +669,18 @@ func TestUpstreamRequestIDDoesNotReachClient(t *testing.T) {
 					Middleware: []edgekit.Middleware{
 						recorder.Middleware,
 					},
-					Hooks: []any{
+					Hooks: edgekit.Hooks{
+						BeforeUpstream: []edgekit.BeforeUpstreamHook{
+							recorder,
+						},
+						UpstreamResponse: []edgekit.UpstreamResponseHook{
+							recorder,
+						},
+						RequestCompleted: []edgekit.RequestCompletedHook{
+							recorder,
+						},
+					},
+					HeaderOwners: []edgekit.HeaderOwner{
 						recorder,
 					},
 					Routes: []edgekit.Route{

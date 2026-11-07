@@ -44,10 +44,12 @@ func ExampleNew() {
 	}
 
 	gateway, err := edgekit.New(edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: selector,
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: selector,
+			},
+		},
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -230,11 +232,13 @@ func ExampleUpstreamSelector() {
 	}
 
 	gateway, err := edgekit.New(edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:     "/api/",
-			Upstream:   selector,
-			Middleware: []edgekit.Middleware{region},
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:     "/api/",
+				Upstream:   selector,
+				Middleware: []edgekit.Middleware{region},
+			},
+		},
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -278,10 +282,12 @@ func ExampleUpstreamSelectorFunc() {
 	})
 
 	gateway, err := edgekit.New(edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: selector,
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: selector,
+			},
+		},
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -318,10 +324,12 @@ func ExampleNewTransport() {
 	}
 
 	_, err = edgekit.New(edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/events/",
-			Upstream: selector,
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/events/",
+				Upstream: selector,
+			},
+		},
 		Transport: transport,
 	})
 	fmt.Println("gateway made:", err == nil)
@@ -329,10 +337,12 @@ func ExampleNewTransport() {
 	// A transport with transparent compression is not valid.
 	transport.DisableCompression = false
 	_, err = edgekit.New(edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/events/",
-			Upstream: selector,
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/events/",
+				Upstream: selector,
+			},
+		},
 		Transport: transport,
 	})
 	fmt.Println("invalid configuration:", errors.Is(err, edgekit.ErrInvalidConfiguration))
@@ -385,14 +395,18 @@ func ExampleBeforeUpstreamHook() {
 	defer transport.CloseIdleConnections()
 
 	gateway, err := edgekit.New(edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: selector,
-		}},
-		// Register a signer after the providers that change headers, so it
-		// is closer to the upstream and signs their changes.
-		Hooks: []any{
-			signer{key: []byte("example key")},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: selector,
+			},
+		},
+		// Register a signer last in BeforeUpstream so it signs the header
+		// changes of the earlier hooks.
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				signer{key: []byte("example key")},
+			},
 		},
 		Transport: transport,
 	})
@@ -461,12 +475,18 @@ func ExampleSetState() {
 
 	ids := &requestIDs{}
 	gateway, err := edgekit.New(edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: selector,
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: selector,
+			},
+		},
 		Middleware: []edgekit.Middleware{ids.Middleware},
-		Hooks:      []any{ids},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				ids,
+			},
+		},
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -527,11 +547,17 @@ func ExampleRejection() {
 	}
 
 	gateway, err := edgekit.New(edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: selector,
-		}},
-		Hooks: []any{apiKeys{}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: selector,
+			},
+		},
+		Hooks: edgekit.Hooks{
+			RequestReceived: []edgekit.RequestReceivedHook{
+				apiKeys{},
+			},
+		},
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -564,11 +590,13 @@ func ExampleRenderer() {
 		}
 
 		body, err := json.Marshal(map[string][]errorObject{
-			"errors": {{
-				Status: strconv.Itoa(p.Status),
-				Code:   string(p.Reason),
-				Title:  http.StatusText(p.Status),
-			}},
+			"errors": {
+				{
+					Status: strconv.Itoa(p.Status),
+					Code:   string(p.Reason),
+					Title:  http.StatusText(p.Status),
+				},
+			},
 		})
 		if err != nil {
 			// The gateway then uses its default renderer.
@@ -583,10 +611,12 @@ func ExampleRenderer() {
 	})
 
 	gateway, err := edgekit.New(edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: selector,
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: selector,
+			},
+		},
 		Renderer: jsonAPI,
 	})
 	if err != nil {

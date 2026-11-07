@@ -97,14 +97,25 @@ func run(ctx context.Context, cfg config, logger *slog.Logger, ready chan<- net.
 		return reportFailure(logger, "access log configuration is not valid", err)
 	}
 
-	// The recorder is the first middleware and the first hook provider, so it
-	// observes all responses. The signer is the last hook provider, so it
-	// signs after all other changes (ADR-0021).
+	// The recorder is the first middleware so it observes inner responses.
+	// The signer is last in BeforeUpstream so it signs all header changes.
 	gateway, err := edgekit.New(edgekit.Config{
 		Middleware: []edgekit.Middleware{
 			recorder.Middleware,
 		},
-		Hooks: []any{
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				recorder,
+				signer,
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				recorder,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				recorder,
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
 			recorder,
 			signer,
 		},

@@ -107,10 +107,21 @@ func TestRecordJoinsHTTPGatewayAndTraceObservations(t *testing.T) {
 					tracing,
 					recorder.Middleware,
 				},
-				Hooks: []any{
+				Hooks: edgekit.Hooks{
+					BeforeUpstream: []edgekit.BeforeUpstreamHook{
+						recorder,
+						checkHook,
+					},
+					UpstreamResponse: []edgekit.UpstreamResponseHook{
+						recorder,
+					},
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						checkCompletion,
+						recorder,
+					},
+				},
+				HeaderOwners: []edgekit.HeaderOwner{
 					recorder,
-					checkHook,
-					checkCompletion,
 				},
 				Routes: []edgekit.Route{
 					apiRoute(t, upstream.URL),
@@ -307,8 +318,8 @@ func TestRecordsGatewayResponsesAndFailures(t *testing.T) {
 			wantFailure:  true,
 		},
 		{
-			// The recorder is the first provider, so its response hook runs
-			// after the rejecting hook and does not run (ADR-0021).
+			// The rejecting response hook is before the recorder, so the
+			// recorder does not observe the upstream status.
 			name: "response hook rejection",
 			response: &hookResult{
 				rejection: denied,
@@ -350,20 +361,27 @@ func TestRecordsGatewayResponsesAndFailures(t *testing.T) {
 				})
 			}
 
-			hooks := []any{
-				recorder,
+			hooks := edgekit.Hooks{
+				BeforeUpstream: []edgekit.BeforeUpstreamHook{
+					recorder,
+				},
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					recorder,
+				},
 			}
 			if tc.received != nil {
-				hooks = append(hooks, edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+				hooks.RequestReceived = append(hooks.RequestReceived, edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 					return tc.received.rejection, tc.received.err
 				}))
 			}
 
 			if tc.response != nil {
-				hooks = append(hooks, edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+				hooks.UpstreamResponse = append(hooks.UpstreamResponse, edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 					return tc.response.rejection, tc.response.err
 				}))
 			}
+
+			hooks.UpstreamResponse = append(hooks.UpstreamResponse, recorder)
 
 			upstreamURL := upstream.URL
 			if tc.upstream != "" {
@@ -384,6 +402,9 @@ func TestRecordsGatewayResponsesAndFailures(t *testing.T) {
 			g := newGateway(t, edgekit.Config{
 				Middleware: middleware,
 				Hooks:      hooks,
+				HeaderOwners: []edgekit.HeaderOwner{
+					recorder,
+				},
 				Routes: []edgekit.Route{
 					route,
 				},
@@ -484,7 +505,18 @@ func TestRecordsCoreProtectionRejections(t *testing.T) {
 			Middleware: []edgekit.Middleware{
 				recorder.Middleware,
 			},
-			Hooks: []any{
+			Hooks: edgekit.Hooks{
+				BeforeUpstream: []edgekit.BeforeUpstreamHook{
+					recorder,
+				},
+				UpstreamResponse: []edgekit.UpstreamResponseHook{
+					recorder,
+				},
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					recorder,
+				},
+			},
+			HeaderOwners: []edgekit.HeaderOwner{
 				recorder,
 			},
 			Routes: []edgekit.Route{
@@ -543,7 +575,18 @@ func TestRecordsCoreProtectionRejections(t *testing.T) {
 			Middleware: []edgekit.Middleware{
 				recorder.Middleware,
 			},
-			Hooks: []any{
+			Hooks: edgekit.Hooks{
+				BeforeUpstream: []edgekit.BeforeUpstreamHook{
+					recorder,
+				},
+				UpstreamResponse: []edgekit.UpstreamResponseHook{
+					recorder,
+				},
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					recorder,
+				},
+			},
+			HeaderOwners: []edgekit.HeaderOwner{
 				recorder,
 			},
 			Admission: budget,
@@ -638,7 +681,18 @@ func TestPanicDoesNotRecordSuccessfulStatus(t *testing.T) {
 					recorder.Middleware,
 					panicking,
 				},
-				Hooks: []any{
+				Hooks: edgekit.Hooks{
+					BeforeUpstream: []edgekit.BeforeUpstreamHook{
+						recorder,
+					},
+					UpstreamResponse: []edgekit.UpstreamResponseHook{
+						recorder,
+					},
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						recorder,
+					},
+				},
+				HeaderOwners: []edgekit.HeaderOwner{
 					recorder,
 				},
 				Routes: []edgekit.Route{
@@ -686,7 +740,18 @@ func TestStreamingReadFailureKeepsPartialObservations(t *testing.T) {
 				Middleware: []edgekit.Middleware{
 					recorder.Middleware,
 				},
-				Hooks: []any{
+				Hooks: edgekit.Hooks{
+					BeforeUpstream: []edgekit.BeforeUpstreamHook{
+						recorder,
+					},
+					UpstreamResponse: []edgekit.UpstreamResponseHook{
+						recorder,
+					},
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						recorder,
+					},
+				},
+				HeaderOwners: []edgekit.HeaderOwner{
 					recorder,
 				},
 				Routes: []edgekit.Route{
@@ -789,7 +854,18 @@ func TestWriteErrorIsSeparateFromGatewayFailure(t *testing.T) {
 
 			g := newGateway(t, edgekit.Config{
 				Middleware: middleware,
-				Hooks: []any{
+				Hooks: edgekit.Hooks{
+					BeforeUpstream: []edgekit.BeforeUpstreamHook{
+						recorder,
+					},
+					UpstreamResponse: []edgekit.UpstreamResponseHook{
+						recorder,
+					},
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						recorder,
+					},
+				},
+				HeaderOwners: []edgekit.HeaderOwner{
 					recorder,
 				},
 				Routes: []edgekit.Route{
@@ -851,7 +927,18 @@ func TestStreamingResponseFlushesBeforeCompletion(t *testing.T) {
 				Middleware: []edgekit.Middleware{
 					recorder.Middleware,
 				},
-				Hooks: []any{
+				Hooks: edgekit.Hooks{
+					BeforeUpstream: []edgekit.BeforeUpstreamHook{
+						recorder,
+					},
+					UpstreamResponse: []edgekit.UpstreamResponseHook{
+						recorder,
+					},
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						recorder,
+					},
+				},
+				HeaderOwners: []edgekit.HeaderOwner{
 					recorder,
 				},
 				Routes: []edgekit.Route{
@@ -926,7 +1013,18 @@ func TestProtocolUpgradeKeepsHijackingAndServerManagement(t *testing.T) {
 		Middleware: []edgekit.Middleware{
 			recorder.Middleware,
 		},
-		Hooks: []any{
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				recorder,
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				recorder,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				recorder,
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
 			recorder,
 		},
 		Routes: []edgekit.Route{
@@ -1028,7 +1126,18 @@ func TestConcurrentRecordsKeepRequestAndTraceIDsIsolated(t *testing.T) {
 			tracing,
 			recorder.Middleware,
 		},
-		Hooks: []any{
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				recorder,
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				recorder,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				recorder,
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
 			recorder,
 		},
 		Routes: []edgekit.Route{
@@ -1118,7 +1227,18 @@ func TestMissingMiddlewareGivesDegradedRecord(t *testing.T) {
 			Middleware: []edgekit.Middleware{
 				recorder.Middleware,
 			},
-			Hooks: []any{
+			Hooks: edgekit.Hooks{
+				BeforeUpstream: []edgekit.BeforeUpstreamHook{
+					recorder,
+				},
+				UpstreamResponse: []edgekit.UpstreamResponseHook{
+					recorder,
+				},
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					recorder,
+				},
+			},
+			HeaderOwners: []edgekit.HeaderOwner{
 				recorder,
 			},
 			Routes: []edgekit.Route{
@@ -1149,7 +1269,18 @@ func TestMissingMiddlewareGivesDegradedRecord(t *testing.T) {
 			Sink: sink,
 		})
 		g := newGateway(t, edgekit.Config{
-			Hooks: []any{
+			Hooks: edgekit.Hooks{
+				BeforeUpstream: []edgekit.BeforeUpstreamHook{
+					recorder,
+				},
+				UpstreamResponse: []edgekit.UpstreamResponseHook{
+					recorder,
+				},
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					recorder,
+				},
+			},
+			HeaderOwners: []edgekit.HeaderOwner{
 				recorder,
 			},
 			Routes: []edgekit.Route{
@@ -1223,8 +1354,8 @@ func TestStandaloneMiddlewarePassesThrough(t *testing.T) {
 }
 
 func TestSinkPanicIsDropped(t *testing.T) {
-	// The recorder is the last provider, so its completion hook runs first,
-	// and a panic that escaped it would skip the other completion hook.
+	// The recorder is first in the completion list, so a panic that escaped
+	// it would skip the other completion hook.
 	type abort struct{}
 
 	for _, tc := range []struct {
@@ -1261,10 +1392,21 @@ func TestSinkPanicIsDropped(t *testing.T) {
 
 			g := newGateway(t, edgekit.Config{
 				Middleware: middleware,
-				Hooks: []any{
-					edgekit.RequestCompletedHookFunc(func(context.Context, *edgekit.RequestContext, edgekit.Completion) {
-						otherRan = true
-					}),
+				Hooks: edgekit.Hooks{
+					BeforeUpstream: []edgekit.BeforeUpstreamHook{
+						recorder,
+					},
+					UpstreamResponse: []edgekit.UpstreamResponseHook{
+						recorder,
+					},
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						recorder,
+						edgekit.RequestCompletedHookFunc(func(context.Context, *edgekit.RequestContext, edgekit.Completion) {
+							otherRan = true
+						}),
+					},
+				},
+				HeaderOwners: []edgekit.HeaderOwner{
 					recorder,
 				},
 				Routes: []edgekit.Route{
@@ -1310,7 +1452,18 @@ func TestNewValidatesAndCopiesConfig(t *testing.T) {
 	cfg.Sink = second
 
 	g := newGateway(t, edgekit.Config{
-		Hooks: []any{
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				recorder,
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				recorder,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				recorder,
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
 			recorder,
 		},
 		Routes: []edgekit.Route{

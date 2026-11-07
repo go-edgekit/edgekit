@@ -17,7 +17,7 @@ Slices:
 0. Groundwork: tag, ledger, and the rewrite rule in AGENTS.md. Done.
 1. Proxy core: routing, the upstream-selector extension point with static selection, forwarding, managed and hop-by-hop headers, transport, and cancellation. Also the request secure defaults: rejection of opaque-form, absolute-form, and asterisk-form targets and `CONNECT`, the path policy in reject mode (R1), query-semicolon rejection (R2), header-name rejection (R3), and `Alt-Svc` removal (R7). Done.
    - 1b. Path and query rewriting on routes, and the path policy in normalize mode.
-2. Lifecycle hooks and request state, including the rename of the hook-provider registration (`Config.Hooks`). Also completion of gateway-owned rejections, failure statuses by source, and the header rules after hooks ([ADR-0017](adr/0017-failure-status-by-source.md) to [ADR-0020](adr/0020-route-prefix-matching-without-redirects.md)). Done.
+2. Lifecycle hooks and request state, including typed phase lists in `Config.Hooks` and separate header-owner declarations ([ADR-0030](adr/0030-typed-hook-phase-lists.md)). Also completion of gateway-owned rejections, failure statuses by source, and the header rules after hooks ([ADR-0017](adr/0017-failure-status-by-source.md) to [ADR-0020](adr/0020-route-prefix-matching-without-redirects.md)). Done.
 3. Typed rejections, the replaceable renderer, and typed failures (R10) ([ADR-0022](adr/0022-rejections-and-the-problem-response.md), [ADR-0023](adr/0023-failure-evidence-and-transport-facts.md)). Done.
    - The failures that `ReverseProxy` reported as `PhaseUnknown` have a source or a stage: a client `Upgrade` value that is not printable is a secure-default rejection with 400, a 101 body that cannot be written and a writer that cannot hijack are embedder defects with 500, and an upstream that does not accept the protocol switch is a failure in `PhaseProtocolSwitch` with 502.
    - R10 is covered in part: the original failure and the trace facts. Slice 5 adds the typed dial failure of the egress transport.
@@ -46,7 +46,7 @@ Scope of the rewrite:
 - Upstream-selector extension point with static selection ([ADR-0008](adr/0008-separate-routing-from-upstream-selection.md)).
 - Typed rejections and replaceable `problem+json` renderer ([ADR-0013](adr/0013-typed-rejections-and-replaceable-renderer.md), [ADR-0022](adr/0022-rejections-and-the-problem-response.md)). Done.
 - Path and query rewriting on routes; routes no longer always forward the original path.
-- Rename the hook-provider registration so "extension" keeps its glossary meaning. Done: `Config.Hooks`.
+- Register hooks separately from extensions, so "extension" keeps its glossary meaning. Done: typed phase lists in `Config.Hooks` and managed-header declarations in `Config.HeaderOwners` (ADR-0030).
 
 ## 3. Bundled access-policy extensions
 

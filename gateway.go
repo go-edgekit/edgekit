@@ -19,8 +19,8 @@ var ErrInvalidConfiguration = errors.New("invalid configuration")
 
 // Config is the configuration of a [Gateway]. [New] copies it, so later
 // changes to a Config value have no effect on the gateway. Values that Config
-// refers to, such as selectors, hook providers, admission budgets, and the
-// transport, are shared with the gateway.
+// refers to, such as selectors, hooks, admission budgets, and the transport,
+// are shared with the gateway.
 type Config struct {
 	// Routes are the routes of the gateway. At least one route is necessary.
 	Routes []Route
@@ -29,25 +29,17 @@ type Config struct {
 	// middleware is the outermost one.
 	Middleware []Middleware
 
-	// Hooks are the hook providers of the gateway. Each value must implement
-	// one or more of [RequestReceivedHook], [BeforeUpstreamHook],
-	// [UpstreamResponseHook], [RequestCompletedHook], and [HeaderOwner]. Nil
-	// values, also typed nil values, are not permitted.
-	//
-	// The first provider is the outermost one, closest to the client, as in
-	// Middleware. The hooks of each phase run serially. [RequestReceivedHook]
-	// and [BeforeUpstreamHook] hooks run in the order of this list, toward the
-	// upstream. [UpstreamResponseHook] and [RequestCompletedHook] hooks run in
-	// the reverse order, back toward the client. So a provider that changes the
-	// request and the response nests like middleware. The position orders a
-	// provider only among the hook providers: the stages of request handling
-	// have a fixed order (see [Gateway]). A value that occurs more than one
-	// time in the list runs one time for each occurrence.
-	//
-	// The gateway shares each value between concurrent requests, so the value
-	// must be safe for concurrent use. Keep request state in the
-	// [RequestContext], not in the value.
-	Hooks []any
+	// Hooks sets the lifecycle hooks in execution order for each phase. The
+	// stages of request handling have a fixed order (see [Gateway]). A hook
+	// runs only in the lists that contain it, even if it implements other
+	// hook interfaces. See [Hooks] for validation and concurrency rules.
+	Hooks Hooks
+
+	// HeaderOwners are the header owners that declare managed headers. Nil
+	// entries, also typed nil entries, are not permitted. Declarations can
+	// overlap with each other and with ManagedHeaders. See [HeaderOwner] for
+	// when New calls them and what it keeps.
+	HeaderOwners []HeaderOwner
 
 	// Transport sends requests to upstreams. If it is nil, the gateway uses its
 	// own transport from [NewTransport]. A typed nil value, such as a nil
@@ -188,10 +180,11 @@ type Route struct {
 //
 // # Lifecycle hooks
 //
-// Register hook providers in [Config.Hooks], which also sets the order of the
-// hooks in each phase. The stages above have a fixed order: for example, all
-// global middleware runs before any [RequestReceivedHook] hook. The middleware
-// and hooks of one request get the same [RequestContext].
+// Register hooks in the phase lists of [Config.Hooks]. Each list runs in its
+// written order, including response and completion hooks (ADR-0030). The
+// stages above have a fixed order: for example, all global middleware runs
+// before any [RequestReceivedHook] hook. The middleware and hooks of one
+// request get the same [RequestContext].
 // Middleware runs before the hooks of the same stage: the route middleware
 // can set request state that the [BeforeUpstreamHook] hooks use.
 //
@@ -443,7 +436,7 @@ type Route struct {
 // these protections are the responsibility of that server.
 type Gateway struct {
 	handler        http.Handler
-	hooks          hooks
+	hooks          compiledHooks
 	managedHeaders map[string]struct{}
 	ownedTransport *http.Transport
 	renderer       Renderer
@@ -482,10 +475,10 @@ var lostContextLog = safelog.New("gateway_context_lost")
 //
 // New works in two phases. First it checks the structure of cfg. If it finds a
 // problem, it returns the errors and calls no middleware function. In this
-// phase, it calls only the ManagedHeaders method of [HeaderOwner] values. Then
-// it calls each middleware function one time to build the handlers, and checks
-// the handlers that they return. New does not change process-wide state, such
-// as the default logger.
+// phase, it calls only the ManagedHeaders method of entries in
+// [Config.HeaderOwners]. Then it calls each middleware function one time to
+// build the handlers, and checks the handlers that they return. New does not
+// change process-wide state, such as the default logger.
 func New(cfg Config) (*Gateway, error) {
 	g := &Gateway{
 		renderer:         cfg.Renderer,

@@ -246,10 +246,12 @@ func TestCloseIdleConnections(t *testing.T) {
 			}), &connections)
 
 			cfg := edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, upstream.URL),
-				}},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, upstream.URL),
+					},
+				},
 			}
 			if tc.configured {
 				cfg.Transport = testTransport(t)
@@ -279,10 +281,12 @@ func TestResponseHeaderTimeoutCancelsUpstream(t *testing.T) {
 	transport := testTransport(t)
 	transport.ResponseHeaderTimeout = 100 * time.Millisecond
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		Transport: transport,
 	})
 
@@ -326,10 +330,12 @@ func TestHeaderTimeoutDoesNotLimitResponseStream(t *testing.T) {
 	transport := testTransport(t)
 	transport.ResponseHeaderTimeout = 50 * time.Millisecond
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		Transport: transport,
 	})
 	server := httptest.NewServer(g)
@@ -381,10 +387,12 @@ func TestCancellationWhileWaitingForConnectionPool(t *testing.T) {
 	transport := testTransport(t)
 	transport.MaxConnsPerHost = 1
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		Transport: transport,
 	})
 
@@ -456,10 +464,12 @@ func TestRequestBodyStreamsBeforeClientEOF(t *testing.T) {
 	defer upstream.Close()
 
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 	})
 	server := httptest.NewServer(g)
 	defer server.Close()
@@ -528,10 +538,12 @@ func TestNoTransparentCompression(t *testing.T) {
 	defer upstream.Close()
 
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 	})
 
 	for _, tc := range []struct {
@@ -630,12 +642,21 @@ func TestUpstreamHeaderLimitBeforeResponseHooks(t *testing.T) {
 			})
 			completionHooks, completed := completions()
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, upstream.URL),
-				}},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, upstream.URL),
+					},
+				},
 				Transport: transport,
-				Hooks:     []any{hooks, completionHooks},
+				Hooks: edgekit.Hooks{
+					UpstreamResponse: []edgekit.UpstreamResponseHook{
+						hooks,
+					},
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						completionHooks,
+					},
+				},
 			})
 
 			for _, path := range []string{"/api/small", "/api/large", "/api/small-again"} {

@@ -81,7 +81,11 @@ func streamResponse(t *testing.T, readErr error) streamedResponse {
 
 			return "text/plain", nil
 		},
-		Hooks: []any{collector},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				collector,
+			},
+		},
 	})
 
 	w := httptest.NewRecorder()
