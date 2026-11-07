@@ -39,6 +39,14 @@ Update this document when a change adds a protocol behavior, a new RFC reference
 | [6890](https://www.rfc-editor.org/rfc/rfc6890), [1918](https://www.rfc-editor.org/rfc/rfc1918), [4291](https://www.rfc-editor.org/rfc/rfc4291) | Special-purpose, private, and IPv6 addresses | Implemented (egress) | The egress allowlist has no implicit permissions for these ranges. Unspecified, multicast, and scoped addresses are always denied | `EgressPolicy` GoDoc; ADR-0025 |
 | [8446](https://www.rfc-editor.org/rfc/rfc8446), [6066](https://www.rfc-editor.org/rfc/rfc6066), [7301](https://www.rfc-editor.org/rfc/rfc7301) | TLS 1.3, SNI, ALPN | Delegated | `crypto/tls` from the caller's configuration. The `Server` adds the ALPN protocols that it needs; the egress transport sends the request host as SNI | `Server` and `EgressTransport` GoDoc; ADR-0016, ADR-0025 |
 
+## Bundled extensions
+
+| RFC | Title | Status | Scope | Where |
+| --- | --- | --- | --- | --- |
+| [2104](https://www.rfc-editor.org/rfc/rfc2104) | HMAC | Implemented (demonstration) | `X-Gateway-Signature` is HMAC-SHA256 over the method, the outbound scheme and authority, `Host`, and the escaped request URI. It is not an authentication protocol: no timestamp, replay protection, or body integrity. The fields are joined with newlines, and the hook fails when a field other than the last contains one, so the signed string is unambiguous. `WithKey` requires a key of at least 32 bytes, the output size of SHA-256 (section 3) | `outboundsign` package GoDoc |
+
+`X-Request-ID` of the access log is a common header that no RFC defines. The access log generates its value and never accepts the client value ([ADR-0029](adr/0029-access-log-extension-contract.md)).
+
 ## Deliberate deviations
 
 Each deviation is documented where users see it. This list only points to it.

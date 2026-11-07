@@ -1573,7 +1573,7 @@ func TestEgressDenialIsAFailureAtCompletion(t *testing.T) {
 				Transport:  transport,
 				Middleware: []edgekit.Middleware{unwinding(&unwound)},
 				Hooks: []any{
-					requestCompletedFunc(func(ctx context.Context, rc *edgekit.RequestContext, c edgekit.Completion) {
+					edgekit.RequestCompletedHookFunc(func(ctx context.Context, rc *edgekit.RequestContext, c edgekit.Completion) {
 						if !unwound {
 							t.Error("RequestCompleted() ran before the middleware unwound")
 						}

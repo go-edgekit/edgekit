@@ -246,7 +246,7 @@ func TestHeaderNameDropRemovesInvalidNames(t *testing.T) {
 			},
 		},
 		Hooks: []any{
-			requestReceivedFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
+			edgekit.RequestReceivedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
 				atHook = observation{
 					headers:  invalidNames(r.Header),
 					trailers: invalidNames(r.Trailer),
@@ -467,7 +467,7 @@ func newAbsoluteFormServer(t *testing.T) *absoluteFormServer {
 		},
 		Hooks: []any{
 			collector,
-			requestReceivedFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
+			edgekit.RequestReceivedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
 				observation.hookURL = r.URL.String()
 				observation.hookHost = r.Host
 				observed <- observation

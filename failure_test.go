@@ -622,13 +622,13 @@ func TestCompletionHooksShareOneFactSnapshot(t *testing.T) {
 	})
 
 	var got []edgekit.Completion
-	record := requestCompletedFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
+	record := edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
 		got = append(got, c)
 	})
 
 	// Completion hooks run from the last provider to the first, so late
 	// runs first.
-	late := requestCompletedFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
+	late := edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
 		trace.GotConn(httptrace.GotConnInfo{})
 		trace.WroteRequest(httptrace.WroteRequestInfo{})
 		got = append(got, c)

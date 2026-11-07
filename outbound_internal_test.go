@@ -9,14 +9,6 @@ import (
 	"testing"
 )
 
-// beforeUpstreamFunc is a BeforeUpstreamHook made from a function.
-type beforeUpstreamFunc func(context.Context, *RequestContext, *OutboundRequest) (*Rejection, error)
-
-// BeforeUpstream calls f.
-func (f beforeUpstreamFunc) BeforeUpstream(ctx context.Context, rc *RequestContext, out *OutboundRequest) (*Rejection, error) {
-	return f(ctx, rc, out)
-}
-
 // roundTripperFunc is an http.RoundTripper made from a function.
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
@@ -100,10 +92,10 @@ func TestOutboundFailureClosesBodyWithoutDelegating(t *testing.T) {
 			laterRan, delegated := false, false
 			transport := &outboundTransport{
 				hooks: []BeforeUpstreamHook{
-					beforeUpstreamFunc(func(context.Context, *RequestContext, *OutboundRequest) (*Rejection, error) {
+					BeforeUpstreamHookFunc(func(context.Context, *RequestContext, *OutboundRequest) (*Rejection, error) {
 						return tc.rejection, tc.hookErr
 					}),
-					beforeUpstreamFunc(func(context.Context, *RequestContext, *OutboundRequest) (*Rejection, error) {
+					BeforeUpstreamHookFunc(func(context.Context, *RequestContext, *OutboundRequest) (*Rejection, error) {
 						laterRan = true
 
 						return nil, nil

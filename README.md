@@ -6,7 +6,7 @@ edgekit is not a CDN, an edge-computing platform, or a cache. It serves, routes,
 
 ## Status
 
-A rewrite replaces the first prototype in slices. See the [roadmap](docs/roadmap.md) and the [rewrite ledger](docs/rewrite-ledger.md). Slice 1, the proxy core, is done: routing, upstream selection, forwarding, header handling, the transport, and the request secure defaults. Slice 2 is done: lifecycle hooks, typed request state, completion with execution facts, and managed headers that extensions declare. Slice 3 is done: typed rejections from hooks, a replaceable renderer with a minimal `problem+json` default, and failure statuses from evidence, including 499 and 504. Slice 4 is done: the hardened `Server`, with header limits, HTTP/2 limits, transfer idle deadlines, and graceful shutdown that also closes upgraded connections. Slice 5 is done: the request-body limit as a secure default, admission budgets and the egress transport as configurable protections, and explicit relaxations of the request secure defaults.
+A rewrite replaces the first prototype in slices. See the [roadmap](docs/roadmap.md) and the [rewrite ledger](docs/rewrite-ledger.md). Slice 1, the proxy core, is done: routing, upstream selection, forwarding, header handling, the transport, and the request secure defaults. Slice 2 is done: lifecycle hooks, typed request state, completion with execution facts, and managed headers that extensions declare. Slice 3 is done: typed rejections from hooks, a replaceable renderer with a minimal `problem+json` default, and failure statuses from evidence, including 499 and 504. Slice 4 is done: the hardened `Server`, with header limits, HTTP/2 limits, transfer idle deadlines, and graceful shutdown that also closes upgraded connections. Slice 5 is done: the request-body limit as a secure default, admission budgets and the egress transport as configurable protections, and explicit relaxations of the request secure defaults. Slice 6 is done: the access-log extension and the outbound-signing demonstration, as bundled extensions that use only the public API.
 
 These parts are not in the core yet:
 
@@ -61,7 +61,7 @@ if err := server.Shutdown(ctx); err != nil {
 
 `Server` is the supported way to serve a gateway. A gateway in your own `http.Server` works, but then that server owns the header limits, the timeouts, and the upgraded connections.
 
-The [`examples/gateway`](examples/gateway) program serves a gateway with signals, graceful shutdown, and failure logs without error details.
+The [`examples/gateway`](examples/gateway) program serves a gateway with signals, graceful shutdown, failure logs without error details, an access log of approved fields, and outbound signing. It requires `EDGEKIT_SIGNING_KEY`, with at least 32 bytes. Make a random key with `openssl rand -hex 32`: it gives 64 hexadecimal characters, which the program uses as the key bytes.
 
 The [`Example` functions](example_test.go) show a static route, a custom upstream selector, a selector function, a changed transport, the server, the body limit, an admission budget, and the egress transport.
 
@@ -72,6 +72,13 @@ The extension points are:
 - **Middleware:** `func(http.Handler) http.Handler`, global or for each route.
 - **Upstream selector:** chooses the upstream URL for a matched request. `StaticUpstream` is the default. `UpstreamSelectorFunc` makes a selector from a function.
 - **Transport:** an `http.RoundTripper`. `NewTransport` gives the transport with the secure defaults. `NewEgressTransport` gives a transport that connects only to allowed origins and IP networks.
+
+## Bundled extensions
+
+Bundled extensions use only the public API, as your own extensions do:
+
+- [`extensions/accesslog`](extensions/accesslog): one record for each request, with the HTTP observations of its middleware, the trace ID, and the execution facts of completion. A `Sink` that you supply gets the records. A `Record` logged with `log/slog` writes only the fields that are safe by default ([ADR-0029](docs/adr/0029-access-log-extension-contract.md)).
+- [`extensions/outboundsign`](extensions/outboundsign): a demonstration that signs the outbound request of a route with HMAC-SHA256. It is not an authentication protocol: it has no timestamp, no replay protection, and no body integrity.
 
 ## Secure defaults
 
