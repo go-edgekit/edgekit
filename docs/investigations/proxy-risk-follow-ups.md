@@ -8,7 +8,7 @@ The [first proxy-hardening pass](../../README.md#proxy-safety-boundaries) establ
 
 **Owner:** Optional outbound transport package plus deployment egress controls.
 
-**Initial implementation:** [`extensions/egress`](../../extensions/egress/README.md) provides an opt-in transport with explicit allowed HTTP(S) origins and IP networks. No universal public-network-only default: private and loopback upstreams are valid when explicitly allowed. Keep the framework's routing and lifecycle API unchanged.
+**Initial implementation:** [`extensions/egress`](https://github.com/go-edgekit/edgekit/blob/prototype-final/extensions/egress/README.md) provides an opt-in transport with explicit allowed HTTP(S) origins and IP networks. No universal public-network-only default: private and loopback upstreams are valid when explicitly allowed. Keep the framework's routing and lifecycle API unchanged.
 
 - Validate origin configuration at construction, including scheme, authority, port, and credentials. Compare each outbound URL with the origin allowlist before transport delegation, including on reused connections.
 - Resolve at connection time. Validate every address in the lookup result before dialing; reject mixed allowed/denied answers rather than falling back to a denied address.

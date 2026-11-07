@@ -199,7 +199,7 @@ func failingStages(t *testing.T, stage edgekit.Phase, err error, middleware []ed
 		}
 	case edgekit.PhaseUpstreamSelection, edgekit.PhaseRoundTrip:
 		// The selector and the transport below fail.
-	case edgekit.PhaseUnknown, edgekit.PhaseProtocolSwitch:
+	case edgekit.PhaseUnknown, edgekit.PhaseProtocolSwitch, edgekit.PhaseResponseBody:
 		t.Fatalf("failingStages() does not support %v", stage)
 	}
 

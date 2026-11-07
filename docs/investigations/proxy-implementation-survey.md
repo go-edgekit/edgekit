@@ -269,7 +269,7 @@ Tyk keeps a heavily modified fork of `ReverseProxy` (`gateway/reverse_proxy.go`,
 oxy is a library of `http.Handler` building blocks that Traefik v1 used.
 
 - `buffer`: buffers the request (and optionally the response) to support retries with an expression language (`IsNetworkError() && Attempts() <= 2`). It keeps up to 1 MiB in memory, then spills to disk. **The default maximum body size is unlimited (`-1`)**, and the default maximum retry attempts is 10.
-- `connlimit`: concurrent-request limit per source (`SourceExtractor`). It uses the same model as this project's [`admission`](../../extensions/admission/README.md), but keyed per client.
+- `connlimit`: concurrent-request limit per source (`SourceExtractor`). It uses the same model as this project's [`admission`](https://github.com/go-edgekit/edgekit/blob/prototype-final/extensions/admission/README.md), but keyed per client.
 - `cbreaker`, `ratelimit`, `roundrobin` (with sticky sessions and a rebalancer), and `stream`.
 
 ### Envoy (reference for edge defaults)
@@ -321,7 +321,7 @@ Envoy also **sanitizes its own control headers** (`x-envoy-*`, retry/timeout ove
 | Envoy | 5s (cluster `connect_timeout` default) | — | route 15s | — | — | 1024 (breaker) | — |
 | **This gateway (example)** | 3s | 5s | 10s | 90s | 16 | 64 | **no** |
 
-This project's example transport is already stricter than most defaults. Disabling the environment proxy is unusual but deliberate ([egress](../../extensions/egress/README.md)).
+This project's example transport is already stricter than most defaults. Disabling the environment proxy is unusual but deliberate ([egress](https://github.com/go-edgekit/edgekit/blob/prototype-final/extensions/egress/README.md)).
 
 ### Streaming and retries
 
@@ -433,7 +433,7 @@ Caddy's implementation is the reference for a future `extensions/idletimeout` (o
 
 - Lura defaults to a minimum of TLS 1.3 when no version is configured.
 - `InsecureSkipVerify` switches exist in Tyk, Caddy, and Traefik. Tyk also uses `InsecureSkipVerify = true` together with custom verification for common-name checks. If verification is customized, keep `InsecureSkipVerify` false and use `VerifyConnection`.
-- Caddy sets the TLS handshake timeout through the context because it uses a custom dialer. A custom `DialTLSContext` does not use `Transport.TLSHandshakeTimeout`. [egress](../../extensions/egress/README.md) already covers custom TLS dial paths.
+- Caddy sets the TLS handshake timeout through the context because it uses a custom dialer. A custom `DialTLSContext` does not use `Transport.TLSHandshakeTimeout`. [egress](https://github.com/go-edgekit/edgekit/blob/prototype-final/extensions/egress/README.md) already covers custom TLS dial paths.
 
 ## Experiments against this gateway
 

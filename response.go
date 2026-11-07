@@ -171,8 +171,31 @@ func (g *Gateway) modifyResponse(resp *http.Response) error {
 	}
 
 	sanitizeResponse(resp)
+	resp.Body = &responseBody{
+		ReadCloser: resp.Body,
+		rc:         rc,
+	}
 
 	return nil
+}
+
+// responseBody observes read failures on the handler goroutine, where the
+// response is copied, not on the transport's request-body reader goroutine.
+type responseBody struct {
+	io.ReadCloser
+
+	rc *RequestContext
+}
+
+// Read keeps the original failure after the final headers are committed.
+// Only the exact io.EOF value ends the proxy's copy without an error.
+func (b *responseBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && err != io.EOF {
+		b.rc.fail(PhaseResponseBody, err)
+	}
+
+	return n, err
 }
 
 // statusAllowed reports whether status is valid after the hooks: 101 for an

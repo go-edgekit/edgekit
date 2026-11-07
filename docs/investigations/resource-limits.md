@@ -10,7 +10,7 @@ This implements a bounded slice of [the follow-up plan](proxy-risk-follow-ups.md
 | --- | --- |
 | Framework | Streaming, request cancellation, existing proxy error rendering, and outer completion remain unchanged. No mandatory concurrency or size policy. |
 | Example executable | `http.Server.MaxHeaderBytes = 64 KiB`; reusable transport `MaxResponseHeaderBytes = 64 KiB`; one global admission budget of 64 downstream calls with zero admission waiters, after access-log middleware. |
-| Optional middleware | [`extensions/admission`](../../extensions/admission/README.md) supplies a shared synchronous budget; `extensions/bodylimit` still supplies the 8 MiB example body-read limit. |
+| Optional middleware | [`extensions/admission`](https://github.com/go-edgekit/edgekit/blob/prototype-final/extensions/admission/README.md) supplies a shared synchronous budget; `extensions/bodylimit` still supplies the 8 MiB example body-read limit. |
 | Serving edge / deployment | Connection limits, per-stream slow-upload and slow-reader policies, admission capacity selection, and separate budgets for long-lived traffic. |
 
 The header settings use Go's native parser/protocol semantics, not an exact universal wire-byte ceiling. Inbound HTTP/1 parsing has a look-ahead allowance; HTTP/2 header lists use decoded protocol accounting. Review the supported Go version and protocol before choosing a budget. The example serves plaintext HTTP/1; upstream tests also exercise standard HTTP/2. The egress transport already copies the template's upstream header limit when enabled explicitly.

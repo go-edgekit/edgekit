@@ -19,6 +19,18 @@ A protection the core enables without configuration because a safe value exists 
 A protection the core provides but leaves off until configured, because a safe value depends on the deployment.
 _Avoid_: Optional extension (it is core, not an extension)
 
+**Body limit**:
+A secure default that limits the bytes that readers get from a request body, for the gateway and for each route. It streams and does not buffer, so it is not an atomic rejection.
+_Avoid_: Upload limit, payload size (they suggest a check of the complete body)
+
+**Admission budget**:
+A configurable protection that limits the requests that are active at the same time in a part of handling. A full budget rejects at once; it has no queue. It limits concurrency, not rate.
+_Avoid_: Rate limit, connection limit
+
+**Egress transport**:
+A transport that the core provides, which sends requests only to allowed origins and connects only to checked addresses in allowed IP networks.
+_Avoid_: Egress extension, SSRF protection (it is not a complete defense)
+
 **Managed header**:
 A header whose meaning the gateway or an extension owns, such as a forwarding or identity header. The core removes managed headers from inbound requests before any extension sets them.
 _Avoid_: Trusted header

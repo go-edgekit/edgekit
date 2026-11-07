@@ -157,7 +157,7 @@ type ServerConfig struct {
 // the writer that Unwrap returns is not a takeover, and the server can
 // remove it.
 //
-// The server does not use total read or write timeouts, which would stop
+// The server does not use total read or write timeouts, because they stop
 // long uploads and streams that make progress. It does not buffer bodies and
 // starts no goroutines and no timers of its own for a request.
 //
@@ -445,7 +445,16 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 	inner := r
 	if !noBody {
-		// A shallow copy, so the server keeps its own request unchanged.
+		// net/http fills this map at the end of an HTTP/1.1 body, also with
+		// trailers that the request did not declare. The copy shares it, so
+		// the gateway sees them (ADR-0027).
+		if r.Trailer == nil {
+			r.Trailer = make(http.Header)
+		}
+
+		// A shallow copy, so the gateway can change the body without a change
+		// to the request of net/http. The two requests share the trailer map
+		// above.
 		inner = new(http.Request)
 		*inner = *r
 		inner.Body = &transferBody{

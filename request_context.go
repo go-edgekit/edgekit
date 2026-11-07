@@ -63,6 +63,11 @@ type RequestContext struct {
 	// outbound is reused for the BeforeUpstream hooks, so the view needs no
 	// allocation of its own.
 	outbound OutboundRequest
+
+	// body is the body of the request, or nil when the request has no body.
+	// It keeps its own synchronized state, because a transport can read the
+	// body on another goroutine.
+	body *requestBody
 }
 
 // requestContextKey is the context key for the gateway context.

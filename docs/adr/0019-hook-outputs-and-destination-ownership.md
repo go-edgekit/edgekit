@@ -98,3 +98,5 @@ Informational responses other than 101 do not reach hooks. The core removes `Alt
 ## Validation / follow-up
 
 Tests verify each row of the tables above, including the 101 response and its upgrade validation, trailer names, informational responses, and the restored fields of an upgrade request.
+
+**Amended 2026-11-05:** [ADR-0027](0027-request-trailers-at-the-end-of-the-body.md) replaces the sentence "The trailer values arrive while the body streams, after the transport started, so the core cannot check them" for client trailers: the core checks the trailers that arrive with the body at its end, and forwards the allowed values.

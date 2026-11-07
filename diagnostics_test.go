@@ -143,8 +143,8 @@ func TestStreamFailureDiagnosticOmitsDetails(t *testing.T) {
 		t.Error("RequestCompleted() Aborted = false, want true")
 	}
 
-	if c.Failure != nil {
-		t.Errorf("RequestCompleted() Failure = %+v, want nil", c.Failure)
+	if c.Failure == nil || c.Failure.Phase != edgekit.PhaseResponseBody || !errors.Is(c.Failure.Err, errSecret) {
+		t.Errorf("RequestCompleted() Failure = %+v, want the original error in PhaseResponseBody", c.Failure)
 	}
 
 	if !unwound {

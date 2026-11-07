@@ -89,6 +89,18 @@ func (rc *RequestContext) failureStatus(phase Phase, err error) int {
 		return statusClientClosedRequest
 	}
 
+	// The sentinel alone is no evidence: the body limit of this request must
+	// have found the overflow (ADR-0025).
+	if errors.Is(err, ErrRequestBodyTooLarge) && rc.body.overflowFound() {
+		return http.StatusRequestEntityTooLarge
+	}
+
+	// The same evidence rule applies to a trailer name that the check at the
+	// end of the body rejected (ADR-0027).
+	if errors.Is(err, ErrInvalidTrailerName) && rc.body.trailerRejectionFound() {
+		return http.StatusBadRequest
+	}
+
 	switch phase {
 	case PhaseRoundTrip:
 		var timeout net.Error
@@ -111,7 +123,7 @@ func (rc *RequestContext) failureStatus(phase Phase, err error) int {
 		return http.StatusInternalServerError
 	case PhaseRequestReceived, PhaseBeforeUpstream:
 		return http.StatusInternalServerError
-	case PhaseUnknown, PhaseProtocolSwitch:
+	case PhaseUnknown, PhaseProtocolSwitch, PhaseResponseBody:
 		return http.StatusBadGateway
 	}
 

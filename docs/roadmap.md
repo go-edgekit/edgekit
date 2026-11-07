@@ -20,11 +20,14 @@ Slices:
 2. Lifecycle hooks and request state, including the rename of the hook-provider registration (`Config.Hooks`). Also completion of gateway-owned rejections, failure statuses by source, and the header rules after hooks ([ADR-0017](adr/0017-failure-status-by-source.md) to [ADR-0020](adr/0020-route-prefix-matching-without-redirects.md)). Done.
 3. Typed rejections, the replaceable renderer, and typed failures (R10) ([ADR-0022](adr/0022-rejections-and-the-problem-response.md), [ADR-0023](adr/0023-failure-evidence-and-transport-facts.md)). Done.
    - The failures that `ReverseProxy` reported as `PhaseUnknown` have a source or a stage: a client `Upgrade` value that is not printable is a secure-default rejection with 400, a 101 body that cannot be written and a writer that cannot hijack are embedder defects with 500, and an upstream that does not accept the protocol switch is a failure in `PhaseProtocolSwitch` with 502.
-   - R10 is covered in part: the original failure and the trace facts. A typed dial failure for the failed attempt comes with the egress dialer (slice 5).
+   - R10 is covered in part: the original failure and the trace facts. Slice 5 adds the typed dial failure of the egress transport.
 4. Core-owned hardened server, with a testable `Example` and an `examples/` program ([ADR-0024](adr/0024-hardened-server-deadlines-and-upgraded-connections.md)). Done.
    - Header-read timeout, header budget, HTTP/2 stream and window limits (R8), and transfer idle deadlines (R9) for requests and upgraded connections. Graceful shutdown closes the upgraded connections of the gateway before it waits for the other requests.
    - TLS from a caller's `tls.Config`. Certificate management and the TLS-termination choice stay open.
-5. Body limit, admission, and egress as core protections. Configuration to relax each request secure default from slice 1.
+5. Body limit, admission, and egress as core protections, and explicit relaxations of the request secure defaults ([ADR-0025](adr/0025-core-protections-body-limit-admission-and-egress.md), [ADR-0026](adr/0026-relax-request-secure-defaults.md)). Done.
+   - The body limit is a secure default of 10 MiB with a limit for each route. Admission budgets and the egress transport are configurable protections. `DialError` gives the attempts of a failed dial of the egress transport; `NewTransport` does not return it yet.
+   - Request trailers are checked at the end of the body and forwarded to middleware and the upstream ([ADR-0027](adr/0027-request-trailers-at-the-end-of-the-body.md)).
+   - Relaxations: `QueryUnchecked`, `HeaderNameDrop`, and `AllowAbsoluteForm`. `CONNECT`, the other target forms, the `Upgrade` check, and the outbound header check cannot be relaxed. The configuration of the path policy comes with normalize mode in slice 1b.
 6. Bundled extensions: access log and outbound signing. Slice 1 removed the `headers` and `requesttag` demonstrations.
 
 The rewrite is done when every ledger row is covered or dropped, the ledger and its AGENTS.md rule are deleted, no document calls the code a prototype, and `just check` passes. The Go API stays provisional until v1.
@@ -32,9 +35,9 @@ The rewrite is done when every ledger row is covered or dropped, the ledger and 
 Scope of the rewrite:
 
 - Public module path and Apache-2.0 license ([ADR-0014](adr/0014-multi-module-repository.md)). Done: `github.com/go-edgekit/edgekit` with the Apache-2.0 license.
-- Secure defaults R1–R5, R7, R8, and R9 (R8 and R9 done); opaque/absolute-form/`CONNECT` rejection; no transparent transport compression; extension-managed headers; body limit, admission, and egress as core protections ([ADR-0012](adr/0012-secure-defaults-and-configurable-protections.md)).
+- Secure defaults R1–R5, R7, R8, and R9 (R8 and R9 done); opaque/absolute-form/`CONNECT` rejection; no transparent transport compression; extension-managed headers; body limit, admission, and egress as core protections ([ADR-0012](adr/0012-secure-defaults-and-configurable-protections.md)). Done: body limit, admission, and egress ([ADR-0025](adr/0025-core-protections-body-limit-admission-and-egress.md)).
 - Core-owned hardened server ([ADR-0016](adr/0016-core-owns-the-inbound-server.md)). Done.
-- Typed dial and request-written failures (R10) as execution facts. Done in part: the request-written and connection facts, and evidence-based 499 and 504 ([ADR-0023](adr/0023-failure-evidence-and-transport-facts.md)). The typed dial failure is pending for the egress dialer.
+- Typed dial and request-written failures (R10) as execution facts. Done in part: the request-written and connection facts, evidence-based 499 and 504 ([ADR-0023](adr/0023-failure-evidence-and-transport-facts.md)), and the `DialError` of the egress transport ([ADR-0025](adr/0025-core-protections-body-limit-admission-and-egress.md)). A typed dial failure for `NewTransport` needs its own decision.
 - Upstream-selector extension point with static selection ([ADR-0008](adr/0008-separate-routing-from-upstream-selection.md)).
 - Typed rejections and replaceable `problem+json` renderer ([ADR-0013](adr/0013-typed-rejections-and-replaceable-renderer.md), [ADR-0022](adr/0022-rejections-and-the-problem-response.md)). Done.
 - Path and query rewriting on routes; routes no longer always forward the original path.

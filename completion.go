@@ -57,8 +57,8 @@ type Completion struct {
 	RequestWritten bool
 
 	// Aborted is true when the gateway-managed handler chain did not return
-	// normally, such as during a panic. A failure while the response streams
-	// to the client can abort without a Failure.
+	// normally, such as during a panic. A response-body read failure has
+	// PhaseResponseBody. A response-write failure can abort without a Failure.
 	Aborted bool
 }
 
@@ -109,6 +109,12 @@ const (
 	// protocol, the hijack of the client connection, and the write of the 101
 	// response to it.
 	PhaseProtocolSwitch
+
+	// PhaseResponseBody is the read of the final response body after the
+	// UpstreamResponse hooks. A read error other than io.EOF is recorded
+	// without changes, also after the response is committed. This phase does
+	// not cover response-write errors or upgraded connections.
+	PhaseResponseBody
 )
 
 // String returns a fixed name for the phase, for logs.
@@ -128,6 +134,8 @@ func (p Phase) String() string {
 		return "upstream_response"
 	case PhaseProtocolSwitch:
 		return "protocol_switch"
+	case PhaseResponseBody:
+		return "response_body"
 	default:
 		return "invalid"
 	}
@@ -154,6 +162,20 @@ const (
 
 // ReasonNoRoute is the rejection reason of a request that matched no route.
 const ReasonNoRoute RejectionReason = "no_route"
+
+// The rejection reasons of the core protections (ADR-0025).
+const (
+	// ReasonBodyTooLarge is the reason of a 413 rejection at the route match:
+	// the declared length or the bytes that were read are more than the body
+	// limit of the route, or the body limit already had an overflow. An
+	// overflow while the body streams is a [Failure] instead (see
+	// [ErrRequestBodyTooLarge]).
+	ReasonBodyTooLarge RejectionReason = "body_too_large"
+
+	// ReasonAdmissionSaturated is the reason of a 503 rejection when an
+	// [AdmissionBudget] has no free slot.
+	ReasonAdmissionSaturated RejectionReason = "admission_saturated"
+)
 
 // completion reads the transport facts once, so all completion hooks get the
 // same snapshot.

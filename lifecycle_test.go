@@ -804,8 +804,8 @@ func TestStreamingFailureAbortsAndCompletes(t *testing.T) {
 	}
 
 	c := receive(t, completed)
-	if !c.Aborted || c.Failure != nil {
-		t.Errorf("completion = %+v, want aborted without failure", c)
+	if !c.Aborted || c.Failure == nil || c.Failure.Phase != edgekit.PhaseResponseBody || !errors.Is(c.Failure.Err, io.ErrUnexpectedEOF) {
+		t.Errorf("completion = %+v, want an abort with io.ErrUnexpectedEOF in PhaseResponseBody", c)
 	}
 }
 
@@ -1401,10 +1401,8 @@ func TestClientCancellationReachesUpstreamAndCompletion(t *testing.T) {
 				t.Errorf("completion = %+v, failure %+v; want a canceled round trip", c, c.Failure)
 			}
 
-			// The proxy reports an abort while it copies the body, not a
-			// failure through its error handler.
-			if tc.streaming && (!c.Aborted || c.Failure != nil) {
-				t.Errorf("completion = %+v, want aborted without failure", c)
+			if tc.streaming && (!c.Aborted || c.Failure == nil || c.Failure.Phase != edgekit.PhaseResponseBody || !errors.Is(c.Failure.Err, context.Canceled)) {
+				t.Errorf("completion = %+v, want an abort with context.Canceled in PhaseResponseBody", c)
 			}
 		})
 	}

@@ -29,7 +29,8 @@ or change the glossary deliberately. Do not use the word.
   boundary, and update it when a protection changes.
 - Check input validation, resource limits, timeouts, cancellation, shutdown,
   and memory growth. Do not let attacker-controlled input amplify work.
-- Keep protocol behavior RFC-compliant. Document each deliberate deviation.
+- Keep protocol behavior RFC-compliant. Document each deliberate deviation,
+  and record each RFC and deviation in [standards](docs/standards.md).
 - Keep error details out of responses. Send diagnostics through
   `internal/safelog`.
 
