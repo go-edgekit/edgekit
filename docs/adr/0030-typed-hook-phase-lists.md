@@ -1,6 +1,6 @@
 # ADR-0030: Register typed hook lists in execution order
 
-- **Status:** Accepted
+- **Status:** Accepted; RequestReceived names and shared-middleware placement superseded in part by [ADR-0031](0031-route-first-request-bodies.md)
 - **Date:** 2026-11-07
 - **Decision owners:** Project maintainers
 - **Supersedes:** [ADR-0021](0021-hook-order-by-provider-position.md)

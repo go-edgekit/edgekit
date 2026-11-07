@@ -1,6 +1,6 @@
 # ADR-0027: Check and forward request trailers at the end of the body
 
-- **Status:** Accepted
+- **Status:** Accepted; shared-middleware placement and buffered trailer handling refined by [ADR-0031](0031-route-first-request-bodies.md)
 - **Date:** 2026-11-05
 - **Decision owners:** Project maintainers
 - **Amends:** [ADR-0019](0019-hook-outputs-and-destination-ownership.md) (the request trailers), [ADR-0023](0023-failure-evidence-and-transport-facts.md) (the status precedence), and [ADR-0025](0025-core-protections-body-limit-admission-and-egress.md) (the request body)

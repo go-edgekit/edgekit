@@ -32,8 +32,11 @@ type transfer struct {
 
 	// readOwned and writeOwned are true after the handler took over the
 	// deadline of that direction.
-	readOwned  bool
-	writeOwned bool
+	readOwned          bool
+	writeOwned         bool
+	readDeadline       time.Time
+	ownedWriteDeadline time.Time
+	buffer             *bufferReadScope
 
 	// readers counts the reads of the request body that are in progress.
 	readers int
@@ -61,26 +64,53 @@ type transfer struct {
 // remove it. Before the first read that makes net/http write "100 Continue",
 // it also sets a write deadline. It leaves that deadline set, because a write
 // of the handler can be active at the same time; each later write sets its
-// own deadline.
-func (t *transfer) beginRead() bool {
+// own deadline. It also returns the buffering scope of the read, or nil for
+// a streaming read, so streaming reads skip the buffering checks.
+func (t *transfer) beginRead() (armed bool, scope *bufferReadScope, err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.expectContinue {
 		t.expectContinue = false
-		if !t.done && !t.writeOwned {
+		if !t.done && t.buffer != nil {
+			deadline := t.buffer.deadline(time.Now())
+			if t.writeOwned {
+				deadline = earlier(deadline, t.ownedWriteDeadline)
+			}
+			if err := t.controller.SetWriteDeadline(deadline); err != nil {
+				return false, nil, errors.Join(errBufferDeadlineSupport, err)
+			}
+			t.buffer.continueDeadline = deadline
+			t.buffer.writeScoped = true
+			t.buffer.continueReading = true
+		} else if !t.done && !t.writeOwned && t.idle > 0 {
 			_ = t.controller.SetWriteDeadline(time.Now().Add(t.idle))
 		}
 	}
 
-	if t.done || t.readOwned {
-		return false
+	if !t.done && t.buffer != nil {
+		deadline := t.buffer.deadline(time.Now())
+		if err := t.controller.SetReadDeadline(deadline); err != nil {
+			return false, nil, errors.Join(errBufferDeadlineSupport, err)
+		}
+
+		if t.buffer.canceled && deadline.Before(t.buffer.applied) {
+			t.buffer.interrupted = true
+		}
+		t.buffer.applied = deadline
+		t.readers++
+
+		return true, t.buffer, nil
+	}
+
+	if t.done || t.readOwned || t.idle == 0 {
+		return false, nil, nil
 	}
 
 	t.readers++
 	_ = t.controller.SetReadDeadline(time.Now().Add(t.idle))
 
-	return true
+	return true, nil, nil
 }
 
 // endRead removes the read deadline when no other call needs it. When a
@@ -95,7 +125,10 @@ func (t *transfer) endRead(armed bool) {
 	defer t.mu.Unlock()
 
 	t.readers--
-	if t.readers != 0 || t.done || t.readOwned {
+	if t.readers == 0 && t.buffer != nil {
+		t.buffer.continueReading = false
+	}
+	if t.readers != 0 || t.done || t.readOwned || t.buffer != nil {
 		return
 	}
 
@@ -119,8 +152,8 @@ func (t *transfer) beginWrite() writeDeadlines {
 
 	drain := t.http1 && !t.bodyDone && !t.fullDuplex
 	set := writeDeadlines{
-		write: !t.done && !t.writeOwned,
-		read:  drain && !t.done && !t.readOwned,
+		write: !t.done && !t.writeOwned && t.idle > 0,
+		read:  drain && !t.done && !t.readOwned && t.idle > 0 && t.buffer == nil,
 	}
 
 	if set.write {
@@ -199,6 +232,7 @@ func (t *transfer) setReadDeadline(deadline time.Time) error {
 	err := t.controller.SetReadDeadline(deadline)
 	if err == nil {
 		t.readOwned = true
+		t.readDeadline = deadline
 	}
 
 	return err
@@ -213,6 +247,7 @@ func (t *transfer) setWriteDeadline(deadline time.Time) error {
 	err := t.controller.SetWriteDeadline(deadline)
 	if err == nil {
 		t.writeOwned = true
+		t.ownedWriteDeadline = deadline
 	}
 
 	return err
@@ -242,11 +277,11 @@ func (t *transfer) finish() {
 	t.done = true
 	drain := t.http1 && !t.bodyDone
 
-	if !t.writeOwned {
+	if !t.writeOwned && t.idle > 0 {
 		_ = t.controller.SetWriteDeadline(t.writeDeadline(drain))
 	}
 
-	if drain && !t.readOwned {
+	if drain && !t.readOwned && t.idle > 0 {
 		_ = t.controller.SetReadDeadline(time.Now().Add(t.idle))
 	}
 }
@@ -262,9 +297,19 @@ type transferBody struct {
 
 // Read reads with a read deadline.
 func (b *transferBody) Read(p []byte) (int, error) {
-	armed := b.transfer.beginRead()
-	n, err := b.ReadCloser.Read(p)
-	b.transfer.endRead(armed)
+	armed, scope, err := b.transfer.beginRead()
+	if err != nil {
+		return 0, err
+	}
+
+	defer b.transfer.endRead(armed)
+
+	var n int
+	if scope == nil {
+		n, err = b.ReadCloser.Read(p)
+	} else {
+		n, err = scope.read(b.ReadCloser, p)
+	}
 
 	if errors.Is(err, io.EOF) {
 		b.transfer.endBody()
@@ -275,9 +320,14 @@ func (b *transferBody) Read(p []byte) (int, error) {
 
 // Close closes with a read deadline.
 func (b *transferBody) Close() error {
-	armed := b.transfer.beginRead()
-	err := b.ReadCloser.Close()
-	b.transfer.endRead(armed)
+	armed, _, err := b.transfer.beginRead()
+	if err != nil {
+		return err
+	}
+
+	defer b.transfer.endRead(armed)
+
+	err = b.ReadCloser.Close()
 	b.transfer.endBody()
 
 	return err

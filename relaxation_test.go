@@ -48,7 +48,7 @@ func recordingUpstream(t *testing.T) (*httptest.Server, <-chan receivedRequest) 
 }
 
 // queryGateway returns a gateway with policy in front of an upstream that
-// records each request. middleware gets the raw query that the global
+// records each request. middleware gets the raw query that the shared
 // middleware saw.
 func queryGateway(t *testing.T, policy edgekit.QueryPolicy) (g *edgekit.Gateway, received <-chan receivedRequest, middleware <-chan string) {
 	t.Helper()
@@ -63,7 +63,7 @@ func queryGateway(t *testing.T, policy edgekit.QueryPolicy) (g *edgekit.Gateway,
 			},
 		},
 		QueryPolicy: policy,
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					seen <- r.URL.RawQuery
@@ -143,12 +143,12 @@ func TestAllowedQueriesAreForwardedUnchanged(t *testing.T) {
 			query:  "k=%",
 		},
 		{
-			name:   "semicolon after a repeated parameter with QueryUnchecked",
+			name:   "repeated parameter semicolon with QueryUnchecked",
 			policy: edgekit.QueryUnchecked,
 			query:  "a=1&a=2;x",
 		},
 		{
-			name:   "more than 10000 parameters with QueryUnchecked",
+			name:   "too many parameters with QueryUnchecked",
 			policy: edgekit.QueryUnchecked,
 			query:  strings.Repeat("k=v&", 10000) + "k=v",
 		},
@@ -234,7 +234,7 @@ func TestHeaderNameDropRemovesInvalidNames(t *testing.T) {
 		},
 		HeaderNamePolicy: edgekit.HeaderNameDrop,
 		ManagedHeaders:   []string{"X-Customer"},
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					atMiddleware = observation{
@@ -246,8 +246,8 @@ func TestHeaderNameDropRemovesInvalidNames(t *testing.T) {
 			},
 		},
 		Hooks: edgekit.Hooks{
-			RequestReceived: []edgekit.RequestReceivedHook{
-				edgekit.RequestReceivedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
+			RouteMatched: []edgekit.RouteMatchedHook{
+				edgekit.RouteMatchedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
 					atHook = observation{
 						headers:  invalidNames(r.Header),
 						trailers: invalidNames(r.Trailer),
@@ -275,8 +275,8 @@ func TestHeaderNameDropRemovesInvalidNames(t *testing.T) {
 	}
 
 	for stage, got := range map[string]observation{
-		"middleware":           atMiddleware,
-		"RequestReceived hook": atHook,
+		"middleware":        atMiddleware,
+		"RouteMatched hook": atHook,
 	} {
 		if len(got.headers) != 0 || len(got.trailers) != 0 {
 			t.Errorf("%s saw invalid headers %v and trailers %v, want none", stage, got.headers, got.trailers)
@@ -315,7 +315,7 @@ func TestHeaderNameDropKeepsOutboundCheck(t *testing.T) {
 			},
 		},
 		HeaderNamePolicy: edgekit.HeaderNameDrop,
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					r = r.Clone(r.Context())
@@ -422,8 +422,8 @@ type targetObservation struct {
 }
 
 // absoluteFormServer is a Server with AllowAbsoluteForm in front of an
-// upstream that records each request. The global middleware and a
-// RequestReceived hook record the target that they see.
+// upstream that records each request. The shared middleware and a
+// RouteMatched hook record the target that they see.
 type absoluteFormServer struct {
 	ts           *testServer
 	upstreamHost string
@@ -460,23 +460,21 @@ func newAbsoluteFormServer(t *testing.T) *absoluteFormServer {
 		},
 		Transport:         transport,
 		AllowAbsoluteForm: true,
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					observation = targetObservation{
-						middlewareURL:  r.URL.String(),
-						middlewareHost: r.Host,
-					}
+					observation.middlewareURL = r.URL.String()
+					observation.middlewareHost = r.Host
+					observed <- observation
 					next.ServeHTTP(w, r)
 				})
 			},
 		},
 		Hooks: edgekit.Hooks{
-			RequestReceived: []edgekit.RequestReceivedHook{
-				edgekit.RequestReceivedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
+			RouteMatched: []edgekit.RouteMatchedHook{
+				edgekit.RouteMatchedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
 					observation.hookURL = r.URL.String()
 					observation.hookHost = r.Host
-					observed <- observation
 
 					return nil, nil
 				}),
@@ -583,7 +581,7 @@ func TestAbsoluteFormThroughServerAcceptsTargets(t *testing.T) {
 				hookHost:       tc.host,
 			}
 			if got != want {
-				t.Errorf("middleware and RequestReceived hook saw %+v, want %+v", got, want)
+				t.Errorf("middleware and RouteMatched hook saw %+v, want %+v", got, want)
 			}
 
 			sent := receive(t, s.received)
@@ -623,19 +621,19 @@ func TestAbsoluteFormThroughServerRejectsTargets(t *testing.T) {
 			reason: edgekit.ReasonInvalidRequestTarget,
 		},
 		{
-			name:   "origin form with a fragment in the path",
+			name:   "origin fragment in the path",
 			line:   "GET /api/item#fragment HTTP/1.1",
 			status: http.StatusBadRequest,
 			reason: edgekit.ReasonInvalidRequestTarget,
 		},
 		{
-			name:   "origin form with an encoded number sign in the path",
+			name:   "origin encoded number sign in the path",
 			line:   "GET /api/a%23b HTTP/1.1",
 			status: http.StatusBadRequest,
 			reason: edgekit.ReasonInvalidPath,
 		},
 		{
-			name:   "origin form with a fragment after the query",
+			name:   "origin fragment after the query",
 			line:   "GET /api/item?x#fragment HTTP/1.1",
 			status: http.StatusBadRequest,
 			reason: edgekit.ReasonInvalidRequestTarget,
@@ -659,7 +657,7 @@ func TestAbsoluteFormThroughServerRejectsTargets(t *testing.T) {
 			reason: edgekit.ReasonInvalidRequestTarget,
 		},
 		{
-			name:   "authority with characters that the transport changes",
+			name:   "authority that the transport changes",
 			line:   "GET http://client_example!/api/item HTTP/1.1",
 			status: http.StatusBadRequest,
 			reason: edgekit.ReasonInvalidRequestTarget,

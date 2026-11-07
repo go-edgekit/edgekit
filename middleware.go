@@ -6,8 +6,9 @@ import (
 	"slices"
 )
 
-// Middleware wraps HTTP handling. It can examine or change the request, write
-// a response, or end handling early when it does not call next.
+// Middleware wraps request processing after route selection and protection.
+// It can examine or change the request, write a response, or end handling
+// early when it does not call next.
 //
 // Middleware uses the standard net/http model, so existing middleware packages
 // work without changes. A middleware must call next synchronously and at most
@@ -23,8 +24,19 @@ import (
 // [Gateway.ServeHTTP]. To change the request, make a copy with
 // [http.Request.Clone], change the copy, and give the copy to next. The
 // headers and trailer names that middleware sets must obey the outbound header
-// check (see [Gateway]). Otherwise the gateway sends 500 Internal Server
-// Error and does not call the upstream.
+// check (see [Gateway]). Changes to path/query, method, and URL fields must
+// also obey the applicable request protections. Invalid output gives 500
+// without forwarding. Routing and its protections remain fixed: a path
+// change is an outbound rewrite, not a request to select another route.
+//
+// Middleware that replaces or expands the body owns its output bounds, body
+// closure, ContentLength, trailers, and GetBody. The inbound limit does not
+// bound generated content. The gateway clears a caller-provided inbound
+// GetBody; only explicit buffering supplies gateway-owned replay. For
+// buffered requests, replay is request-scoped: close a consumed cursor and
+// explicitly replace Body with a GetBody cursor to forward the complete
+// buffered content. Never retain these capabilities after handling. See
+// [RequestBuffering].
 //
 // The gateway calls each middleware function one time, in [New], and uses the
 // returned handler for all requests. The returned handler must be safe for

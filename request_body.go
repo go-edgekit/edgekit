@@ -29,18 +29,18 @@ var errLateTrailerName = fmt.Errorf("check trailers at the end of the body: %w",
 // them (ADR-0027). A transport can read it on another goroutine, also after
 // the handler returned, so it never changes the gateway context.
 //
-// Concurrency: limit, bytesRead, overflowed, and trailerRejected are atomic,
+// Concurrency: bytesRead, overflowed, and trailerRejected are atomic,
 // because the handler reads them while a transport can read the body. The
 // other fields belong to the goroutine that reads the body: the handler sets
 // carried and outbound before the transport starts, and the reader of the
 // body uses them and sets ended and endErr after that, as net/http requires
-// for trailers. The optional-body methods setLimit, recordCarried,
+// for trailers. The optional-body methods recordCarried,
 // attachOutbound, overflowFound, and trailerRejectionFound accept a nil
 // receiver. Read and Close require a body.
 type requestBody struct {
 	io.ReadCloser
 
-	limit      atomic.Int64
+	limit      int64
 	bytesRead  atomic.Int64
 	overflowed atomic.Bool
 
@@ -86,8 +86,8 @@ func (g *Gateway) newRequestBody(source, inner *http.Request, limit int64) *requ
 		declared:   canonicalTrailerNames(inner.Trailer),
 		source:     source,
 		inner:      inner.Trailer,
+		limit:      limit,
 	}
-	b.limit.Store(limit)
 
 	return b
 }
@@ -107,11 +107,11 @@ func (b *requestBody) Read(p []byte) (int, error) {
 
 // readLimited reads at most one byte more than the remaining limit, so it
 // finds an overflow at the exact limit without reading ahead. An overflow is
-// final, also when the limit is disabled after it. eof is true only for
-// io.EOF itself: the transport copies the body until that value, so a
-// wrapped io.EOF is a failure and publishes no trailers.
+// final. eof is true only for io.EOF itself: the transport copies the body
+// until that value, so a wrapped io.EOF is a failure and publishes no
+// trailers.
 func (b *requestBody) readLimited(p []byte) (n int, eof bool, err error) {
-	limit := b.limit.Load()
+	limit := b.limit
 	if b.overflowed.Load() {
 		return 0, false, tooLarge(limit)
 	}
@@ -123,15 +123,7 @@ func (b *requestBody) readLimited(p []byte) (n int, eof bool, err error) {
 		return n, err == io.EOF, err
 	}
 
-	// A limit below the bytes that were read is an overflow that setLimit
-	// did not see, because another goroutine read the body while it ran.
-	// This check prevents a slice index below zero.
 	remaining := limit - b.bytesRead.Load()
-	if remaining < 0 {
-		b.overflowed.Store(true)
-
-		return 0, false, tooLarge(limit)
-	}
 
 	// The comparison without remaining+1 cannot overflow for a limit of
 	// math.MaxInt64.
@@ -150,30 +142,6 @@ func (b *requestBody) readLimited(p []byte) (n int, eof bool, err error) {
 	b.bytesRead.Add(int64(n))
 
 	return n, err == io.EOF, err
-}
-
-// setLimit sets the route limit and reports false when the body already
-// went over it. Then the overflow is final, and an earlier overflow keeps
-// the limit that it went over.
-func (b *requestBody) setLimit(limit int64) bool {
-	if b == nil {
-		return true
-	}
-
-	if b.overflowed.Load() {
-		return false
-	}
-
-	if limit != noBodyLimit && b.bytesRead.Load() > limit {
-		b.overflowed.Store(true)
-		b.limit.Store(limit)
-
-		return false
-	}
-
-	b.limit.Store(limit)
-
-	return true
 }
 
 // recordCarried records whether in, the request that the route middleware

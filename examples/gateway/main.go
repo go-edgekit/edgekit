@@ -100,7 +100,7 @@ func run(ctx context.Context, cfg config, logger *slog.Logger, ready chan<- net.
 	// The recorder is the first middleware so it observes inner responses.
 	// The signer is last in BeforeUpstream so it signs all header changes.
 	gateway, err := edgekit.New(edgekit.Config{
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			recorder.Middleware,
 		},
 		Hooks: edgekit.Hooks{
@@ -274,7 +274,7 @@ func safeReason(reason edgekit.RejectionReason) string {
 		return "none"
 	case edgekit.ReasonInvalidMethod, edgekit.ReasonInvalidRequestTarget, edgekit.ReasonInvalidPath,
 		edgekit.ReasonInvalidQuery, edgekit.ReasonInvalidHeaderName, edgekit.ReasonInvalidUpgrade,
-		edgekit.ReasonNoRoute, edgekit.ReasonBodyTooLarge, edgekit.ReasonAdmissionSaturated:
+		edgekit.ReasonNoRoute, edgekit.ReasonBodyTooLarge, edgekit.ReasonAdmissionSaturated, edgekit.ReasonRequestBufferSaturated:
 		return string(reason)
 	default:
 		return "other"
@@ -288,8 +288,8 @@ func failurePhase(failure *edgekit.Failure) string {
 	}
 
 	switch failure.Phase {
-	case edgekit.PhaseUnknown, edgekit.PhaseRequestReceived, edgekit.PhaseUpstreamSelection,
-		edgekit.PhaseBeforeUpstream, edgekit.PhaseRoundTrip, edgekit.PhaseUpstreamResponse,
+	case edgekit.PhaseUnknown, edgekit.PhaseRouteMatched, edgekit.PhaseUpstreamSelection,
+		edgekit.PhaseBeforeUpstream, edgekit.PhaseRoundTrip, edgekit.PhaseUpstreamResponse, edgekit.PhaseRequestBuffering,
 		edgekit.PhaseProtocolSwitch, edgekit.PhaseResponseBody:
 		return failure.Phase.String()
 	default:

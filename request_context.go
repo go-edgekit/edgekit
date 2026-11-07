@@ -8,9 +8,9 @@ import (
 )
 
 // RequestContext is the gateway context of one request. The gateway makes it
-// before the global middleware runs, and its lifetime ends with request
-// completion. Get it with [FromContext] in middleware, and as an argument in
-// lifecycle hooks.
+// before route selection or shared middleware, and its lifetime ends with
+// request completion. Get it with [FromContext] in middleware, and as an
+// argument in lifecycle hooks.
 //
 // It gives a read-only view of gateway metadata: the start time, the matched
 // route, and the selected upstream. Extensions keep their request state on it
@@ -25,8 +25,22 @@ import (
 //     no value and [SetState] has no effect.
 //   - Only the gateway makes a RequestContext. The zero value is not useful.
 type RequestContext struct {
-	start     time.Time
-	route     string
+	start time.Time
+
+	// matched is the route that the original routing input selected, or nil
+	// before or without a match. It never changes after the match, and end
+	// keeps it, because it points to gateway configuration, not request data.
+	matched *route
+
+	// inboundMethod is the validated client method. Middleware output may
+	// keep it without a new token check (see validOutbound).
+	inboundMethod string
+
+	// source is the request that net/http made. Its trailer map is the one
+	// that net/http fills at the end of the body, so wrapBody needs it after
+	// matching. serveRoute clears it.
+	source *http.Request
+
 	upstream  *url.URL
 	rejection RejectionReason
 	failure   *Failure
@@ -67,7 +81,8 @@ type RequestContext struct {
 	// body is the body of the request, or nil when the request has no body.
 	// It keeps its own synchronized state, because a transport can read the
 	// body on another goroutine.
-	body *requestBody
+	body   *requestBody
+	buffer *requestBuffer
 }
 
 // requestContextKey is the context key for the gateway context.
@@ -91,9 +106,15 @@ func (rc *RequestContext) StartTime() time.Time {
 }
 
 // RoutePrefix returns the prefix of the matched route. It reports false before
-// routing and when no route matched.
+// routing and when no route matched. After matching, it remains the original
+// match even when middleware changes the outbound path. A match alone does
+// not establish that RouteMatched hooks or processing middleware ran.
 func (rc *RequestContext) RoutePrefix() (string, bool) {
-	return rc.route, rc.route != ""
+	if rc.matched == nil {
+		return "", false
+	}
+
+	return rc.matched.prefix, true
 }
 
 // SelectedUpstream returns a copy of the URL that the upstream selector
@@ -114,6 +135,10 @@ func (rc *RequestContext) end() {
 	rc.state = nil
 	rc.ended = true
 	rc.entry = nil
+	rc.source = nil
+	rc.buffer = nil
+	rc.body = nil
+	rc.inboundMethod = ""
 }
 
 // StateKey identifies request state of type T. Each key has its own identity,

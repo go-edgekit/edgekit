@@ -469,6 +469,11 @@ func TestSafeReason(t *testing.T) {
 			want:   "admission_saturated",
 		},
 		{
+			name:   "request_buffer_saturated",
+			reason: edgekit.ReasonRequestBufferSaturated,
+			want:   "request_buffer_saturated",
+		},
+		{
 			name:   "empty",
 			reason: "",
 			want:   "none",
@@ -499,9 +504,9 @@ func TestFailurePhase(t *testing.T) {
 			want:    "unknown",
 		},
 		{
-			name:    "request_received",
-			failure: &edgekit.Failure{Phase: edgekit.PhaseRequestReceived},
-			want:    "request_received",
+			name:    "route_matched",
+			failure: &edgekit.Failure{Phase: edgekit.PhaseRouteMatched},
+			want:    "route_matched",
 		},
 		{
 			name:    "upstream_selection",
@@ -532,6 +537,11 @@ func TestFailurePhase(t *testing.T) {
 			name:    "response_body",
 			failure: &edgekit.Failure{Phase: edgekit.PhaseResponseBody},
 			want:    "response_body",
+		},
+		{
+			name:    "request_buffering",
+			failure: &edgekit.Failure{Phase: edgekit.PhaseRequestBuffering},
+			want:    "request_buffering",
 		},
 		{
 			name:    "no_failure",

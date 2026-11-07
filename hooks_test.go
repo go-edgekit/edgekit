@@ -22,8 +22,8 @@ type testHooks struct {
 	completed func(context.Context, *edgekit.RequestContext, edgekit.Completion)
 }
 
-// RequestReceived calls h.received when it is set.
-func (h *testHooks) RequestReceived(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
+// RouteMatched calls h.received when it is set.
+func (h *testHooks) RouteMatched(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
 	if h.received == nil {
 		return nil, nil
 	}
@@ -58,7 +58,7 @@ func (h *testHooks) RequestCompleted(ctx context.Context, rc *edgekit.RequestCon
 
 // allPhaseHook implements the hook interfaces of all four phases.
 type allPhaseHook interface {
-	edgekit.RequestReceivedHook
+	edgekit.RouteMatchedHook
 	edgekit.BeforeUpstreamHook
 	edgekit.UpstreamResponseHook
 	edgekit.RequestCompletedHook
@@ -68,7 +68,7 @@ type allPhaseHook interface {
 // not matter.
 func allPhases(h allPhaseHook) edgekit.Hooks {
 	return edgekit.Hooks{
-		RequestReceived: []edgekit.RequestReceivedHook{
+		RouteMatched: []edgekit.RouteMatchedHook{
 			h,
 		},
 		BeforeUpstream: []edgekit.BeforeUpstreamHook{
@@ -152,9 +152,9 @@ func TestHookAdaptersExposeOnlyTheirPhase(t *testing.T) {
 		phase    string
 	}{
 		{
-			name:     "request received",
-			provider: edgekit.RequestReceivedHookFunc(nil),
-			phase:    "RequestReceived",
+			name:     "route matched",
+			provider: edgekit.RouteMatchedHookFunc(nil),
+			phase:    "RouteMatched",
 		},
 		{
 			name:     "before upstream",
@@ -179,8 +179,8 @@ func TestHookAdaptersExposeOnlyTheirPhase(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var phases []string
-			if _, ok := tc.provider.(edgekit.RequestReceivedHook); ok {
-				phases = append(phases, "RequestReceived")
+			if _, ok := tc.provider.(edgekit.RouteMatchedHook); ok {
+				phases = append(phases, "RouteMatched")
 			}
 
 			if _, ok := tc.provider.(edgekit.BeforeUpstreamHook); ok {
@@ -225,6 +225,14 @@ func TestOutboundHeaderCheckDoesNotDependOnHooks(t *testing.T) {
 			name: "control character in value",
 			change: func(r *http.Request) {
 				r.Header.Set("X-Valid", "a\x01b")
+			},
+		},
+		{
+			name: "control character in trailer value",
+			change: func(r *http.Request) {
+				r.Trailer = http.Header{
+					"X-End": {"private\r\nvalue"},
+				}
 			},
 		},
 		{
@@ -314,7 +322,7 @@ func TestHooksRunInWrittenOrderPerPhase(t *testing.T) {
 		},
 		Transport: hookTransport(),
 		Hooks: edgekit.Hooks{
-			RequestReceived: []edgekit.RequestReceivedHook{
+			RouteMatched: []edgekit.RouteMatchedHook{
 				a,
 				b,
 				b,
@@ -396,7 +404,7 @@ func TestHookListsAreCopied(t *testing.T) {
 		},
 		Transport: hookTransport(),
 		Hooks: edgekit.Hooks{
-			RequestReceived: []edgekit.RequestReceivedHook{
+			RouteMatched: []edgekit.RouteMatchedHook{
 				hook,
 			},
 			BeforeUpstream: []edgekit.BeforeUpstreamHook{
@@ -411,7 +419,7 @@ func TestHookListsAreCopied(t *testing.T) {
 		},
 	}
 	g := newGateway(t, cfg)
-	cfg.Hooks.RequestReceived[0] = replacement
+	cfg.Hooks.RouteMatched[0] = replacement
 	cfg.Hooks.BeforeUpstream[0] = replacement
 	cfg.Hooks.UpstreamResponse[0] = replacement
 	cfg.Hooks.RequestCompleted[0] = replacement
@@ -463,7 +471,7 @@ func TestInvalidHooks(t *testing.T) {
 	var typedNil *testHooks
 	for _, tc := range []struct {
 		name      string
-		received  edgekit.RequestReceivedHook
+		received  edgekit.RouteMatchedHook
 		before    edgekit.BeforeUpstreamHook
 		response  edgekit.UpstreamResponseHook
 		completed edgekit.RequestCompletedHook
@@ -480,7 +488,7 @@ func TestInvalidHooks(t *testing.T) {
 		},
 		{
 			name:      "nil function adapters",
-			received:  edgekit.RequestReceivedHookFunc(nil),
+			received:  edgekit.RouteMatchedHookFunc(nil),
 			before:    edgekit.BeforeUpstreamHookFunc(nil),
 			response:  edgekit.UpstreamResponseHookFunc(nil),
 			completed: edgekit.RequestCompletedHookFunc(nil),
@@ -495,7 +503,7 @@ func TestInvalidHooks(t *testing.T) {
 					},
 				},
 				Hooks: edgekit.Hooks{
-					RequestReceived: []edgekit.RequestReceivedHook{
+					RouteMatched: []edgekit.RouteMatchedHook{
 						&testHooks{},
 						tc.received,
 					},
@@ -518,7 +526,7 @@ func TestInvalidHooks(t *testing.T) {
 			}
 
 			for _, phase := range []string{
-				"request received",
+				"route matched",
 				"before upstream",
 				"upstream response",
 				"request completed",
@@ -543,7 +551,7 @@ func TestEmptyHookListsAccepted(t *testing.T) {
 		{
 			name: "empty lists",
 			hooks: edgekit.Hooks{
-				RequestReceived:  []edgekit.RequestReceivedHook{},
+				RouteMatched:     []edgekit.RouteMatchedHook{},
 				BeforeUpstream:   []edgekit.BeforeUpstreamHook{},
 				UpstreamResponse: []edgekit.UpstreamResponseHook{},
 				RequestCompleted: []edgekit.RequestCompletedHook{},

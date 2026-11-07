@@ -166,7 +166,7 @@ func TestProxyForwardsRequestAndAppliesRouteMiddleware(t *testing.T) {
 	}
 }
 
-func TestGlobalAndRouteMiddlewareOrder(t *testing.T) {
+func TestSharedAndRouteMiddlewareOrder(t *testing.T) {
 	var (
 		mu    sync.Mutex
 		steps []string
@@ -204,22 +204,22 @@ func TestGlobalAndRouteMiddlewareOrder(t *testing.T) {
 				Middleware: []edgekit.Middleware{wrap("route1"), wrap("route2")},
 			},
 		},
-		Middleware: []edgekit.Middleware{wrap("global1"), wrap("global2")},
+		SharedMiddleware: []edgekit.Middleware{wrap("shared1"), wrap("shared2")},
 	})
 
 	g.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/example", nil))
 
 	want := []string{
-		"global1:before",
-		"global2:before",
+		"shared1:before",
+		"shared2:before",
 		"route1:before",
 		"route2:before",
 		"select",
 		"upstream",
 		"route2:after",
 		"route1:after",
-		"global2:after",
-		"global1:after",
+		"shared2:after",
+		"shared1:after",
 	}
 	mu.Lock()
 	got := slices.Clone(steps)
@@ -230,7 +230,7 @@ func TestGlobalAndRouteMiddlewareOrder(t *testing.T) {
 	}
 }
 
-func TestGlobalMiddlewareRunsForRouteMiss(t *testing.T) {
+func TestSharedMiddlewareSkipsRouteMiss(t *testing.T) {
 	ran := false
 	g := newGateway(t, edgekit.Config{
 		Routes: []edgekit.Route{
@@ -239,7 +239,7 @@ func TestGlobalMiddlewareRunsForRouteMiss(t *testing.T) {
 				Upstream: static(t, "http://upstream.invalid"),
 			},
 		},
-		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
+		SharedMiddleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				ran = true
 				next.ServeHTTP(w, r)
@@ -250,8 +250,8 @@ func TestGlobalMiddlewareRunsForRouteMiss(t *testing.T) {
 	w := httptest.NewRecorder()
 	g.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/other", nil))
 
-	if !ran {
-		t.Error("global middleware ran = false, want true")
+	if ran {
+		t.Error("shared middleware ran for a route miss")
 	}
 
 	if want := problem(http.StatusNotFound, edgekit.ReasonNoRoute); w.Code != http.StatusNotFound || w.Body.String() != want {
@@ -640,8 +640,8 @@ func TestInvalidConfiguration(t *testing.T) {
 	}
 	withMiddleware := func(middleware ...edgekit.Middleware) edgekit.Config {
 		return edgekit.Config{
-			Routes:     []edgekit.Route{route("/api/")},
-			Middleware: middleware,
+			Routes:           []edgekit.Route{route("/api/")},
+			SharedMiddleware: middleware,
 		}
 	}
 	withRouteMiddleware := func(middleware ...edgekit.Middleware) edgekit.Config {
@@ -725,14 +725,14 @@ func TestInvalidConfiguration(t *testing.T) {
 			location: "route 0: middleware 1:",
 		},
 		{
-			name:     "nil global middleware",
+			name:     "nil shared middleware",
 			cfg:      withMiddleware(passThrough, nil),
-			location: "middleware 1:",
+			location: "shared middleware 1:",
 		},
 		{
-			name:     "global middleware returns nil",
+			name:     "shared middleware returns nil",
 			cfg:      withMiddleware(passThrough, nilHandler),
-			location: "middleware 1:",
+			location: "shared middleware 1:",
 		},
 		{
 			name: "compressing transport",
@@ -809,7 +809,7 @@ func TestMiddlewareIsCalledOnceForValidConfiguration(t *testing.T) {
 				Middleware: []edgekit.Middleware{counted},
 			},
 		},
-		Middleware: []edgekit.Middleware{counted},
+		SharedMiddleware: []edgekit.Middleware{counted},
 	})
 
 	if got := calls.Load(); got != 2 {
@@ -834,7 +834,7 @@ func TestMiddlewareIsNotCalledForStructuralProblem(t *testing.T) {
 				Middleware: []edgekit.Middleware{counted},
 			},
 		},
-		Middleware: []edgekit.Middleware{counted},
+		SharedMiddleware: []edgekit.Middleware{counted},
 	})
 
 	if !errors.Is(err, edgekit.ErrInvalidConfiguration) {

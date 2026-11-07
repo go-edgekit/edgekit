@@ -103,7 +103,7 @@ func TestRecordJoinsHTTPGatewayAndTraceObservations(t *testing.T) {
 			})
 
 			g := newGateway(t, edgekit.Config{
-				Middleware: []edgekit.Middleware{
+				SharedMiddleware: []edgekit.Middleware{
 					tracing,
 					recorder.Middleware,
 				},
@@ -256,8 +256,9 @@ func TestRecordsGatewayResponsesAndFailures(t *testing.T) {
 		wantConnection bool
 	}{
 		{
-			name:       "global middleware response",
+			name:       "shared middleware response",
 			local:      true,
+			wantRoute:  true,
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
@@ -273,6 +274,7 @@ func TestRecordsGatewayResponsesAndFailures(t *testing.T) {
 			},
 			wantStatus: http.StatusForbidden,
 			wantReason: "test.denied",
+			wantRoute:  true,
 		},
 		{
 			name: "request hook failure",
@@ -280,9 +282,10 @@ func TestRecordsGatewayResponsesAndFailures(t *testing.T) {
 				err: internal,
 			},
 			wantStatus:  http.StatusInternalServerError,
-			wantPhase:   edgekit.PhaseRequestReceived,
+			wantPhase:   edgekit.PhaseRouteMatched,
 			wantFailure: true,
 			wantCause:   internal,
+			wantRoute:   true,
 		},
 		{
 			name: "invalid rejection",
@@ -290,9 +293,10 @@ func TestRecordsGatewayResponsesAndFailures(t *testing.T) {
 				rejection: invalid,
 			},
 			wantStatus:  http.StatusInternalServerError,
-			wantPhase:   edgekit.PhaseRequestReceived,
+			wantPhase:   edgekit.PhaseRouteMatched,
 			wantFailure: true,
 			wantCause:   edgekit.ErrInvalidRejection,
+			wantRoute:   true,
 		},
 		{
 			name:       "routing miss",
@@ -370,7 +374,7 @@ func TestRecordsGatewayResponsesAndFailures(t *testing.T) {
 				},
 			}
 			if tc.received != nil {
-				hooks.RequestReceived = append(hooks.RequestReceived, edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+				hooks.RouteMatched = append(hooks.RouteMatched, edgekit.RouteMatchedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 					return tc.received.rejection, tc.received.err
 				}))
 			}
@@ -400,8 +404,8 @@ func TestRecordsGatewayResponsesAndFailures(t *testing.T) {
 			}
 
 			g := newGateway(t, edgekit.Config{
-				Middleware: middleware,
-				Hooks:      hooks,
+				SharedMiddleware: middleware,
+				Hooks:            hooks,
 				HeaderOwners: []edgekit.HeaderOwner{
 					recorder,
 				},
@@ -425,20 +429,26 @@ func TestRecordsGatewayResponsesAndFailures(t *testing.T) {
 
 			record := got[0]
 			c := record.Completion
-			if !record.Observed {
-				t.Error("Observed = false, want true")
+			wantObserved := tc.received == nil && tc.path == ""
+			if record.Observed != wantObserved {
+				t.Errorf("Observed = %v, want %v", record.Observed, wantObserved)
 			}
 
-			if record.Status != tc.wantStatus {
-				t.Errorf("Status = %d, want %d", record.Status, tc.wantStatus)
+			if w.Code != tc.wantStatus {
+				t.Errorf("response status = %d, want %d", w.Code, tc.wantStatus)
 			}
-
-			if record.Status != w.Code {
-				t.Errorf("Status = %d, want response status %d", record.Status, w.Code)
+			wantStatus, wantBytes := 0, int64(0)
+			if wantObserved {
+				wantStatus, wantBytes = tc.wantStatus, int64(w.Body.Len())
 			}
-
-			if record.BytesWritten != int64(w.Body.Len()) {
-				t.Errorf("BytesWritten = %d, want response body length %d", record.BytesWritten, w.Body.Len())
+			if record.Status != wantStatus {
+				t.Errorf("Record.Status = %d, want %d", record.Status, wantStatus)
+			}
+			if record.BytesWritten != wantBytes {
+				t.Errorf("Record.BytesWritten = %d, want %d", record.BytesWritten, wantBytes)
+			}
+			if !wantObserved && (record.Path != "" || record.Method != "" || record.RequestID != "") {
+				t.Errorf("unobserved request has middleware data: %+v", record)
 			}
 
 			if record.UpstreamStatus != tc.wantUpstream {
@@ -485,8 +495,12 @@ func TestRecordsGatewayResponsesAndFailures(t *testing.T) {
 				t.Errorf("Failure = %+v, want the cause %v", c.Failure, tc.wantCause)
 			}
 
-			if got := w.Header().Values(accesslog.RequestIDHeader); !slices.Equal(got, []string{record.RequestID}) {
-				t.Errorf("response request IDs = %q, want only %q", got, record.RequestID)
+			var wantIDs []string
+			if wantObserved {
+				wantIDs = []string{record.RequestID}
+			}
+			if got := w.Header().Values(accesslog.RequestIDHeader); !slices.Equal(got, wantIDs) {
+				t.Errorf("response request IDs = %q, want %q", got, wantIDs)
 			}
 		})
 	}
@@ -502,7 +516,7 @@ func TestRecordsCoreProtectionRejections(t *testing.T) {
 		route := apiRoute(t, "http://upstream.test")
 		route.BodyLimit = edgekit.MaxBodyBytes(4)
 		g := newGateway(t, edgekit.Config{
-			Middleware: []edgekit.Middleware{
+			SharedMiddleware: []edgekit.Middleware{
 				recorder.Middleware,
 			},
 			Hooks: edgekit.Hooks{
@@ -532,7 +546,7 @@ func TestRecordsCoreProtectionRejections(t *testing.T) {
 			t.Fatalf("wait for body-limit rejection record: %v", err)
 		}
 
-		if w.Code != http.StatusRequestEntityTooLarge || record.Status != w.Code || record.Completion.RejectionReason != edgekit.ReasonBodyTooLarge {
+		if w.Code != http.StatusRequestEntityTooLarge || record.Observed || record.Status != 0 || record.Completion.RejectionReason != edgekit.ReasonBodyTooLarge {
 			t.Errorf("response %d, record status %d, reason %q; want 413 and body_too_large", w.Code, record.Status, record.Completion.RejectionReason)
 		}
 
@@ -572,7 +586,7 @@ func TestRecordsCoreProtectionRejections(t *testing.T) {
 			Sink: sink,
 		})
 		g := newGateway(t, edgekit.Config{
-			Middleware: []edgekit.Middleware{
+			SharedMiddleware: []edgekit.Middleware{
 				recorder.Middleware,
 			},
 			Hooks: edgekit.Hooks{
@@ -627,11 +641,11 @@ func TestRecordsCoreProtectionRejections(t *testing.T) {
 		if err != nil {
 			t.Fatalf("wait for admitted request record: %v", err)
 		}
-		if w.Code != http.StatusServiceUnavailable || saturated.Status != w.Code || saturated.Completion.RejectionReason != edgekit.ReasonAdmissionSaturated {
+		if w.Code != http.StatusServiceUnavailable || saturated.Observed || saturated.Status != 0 || saturated.Completion.RejectionReason != edgekit.ReasonAdmissionSaturated {
 			t.Errorf("response %d, record %+v; want 503 and admission_saturated", w.Code, saturated)
 		}
 
-		if saturated.Completion.RoutePrefix != "" || saturated.Path != "/api/fast" {
+		if saturated.Completion.RoutePrefix != "" || saturated.Path != "" {
 			t.Errorf("record = %+v, want no route, because gateway admission is before routing", saturated)
 		}
 
@@ -677,7 +691,7 @@ func TestPanicDoesNotRecordSuccessfulStatus(t *testing.T) {
 				})
 			}
 			g := newGateway(t, edgekit.Config{
-				Middleware: []edgekit.Middleware{
+				SharedMiddleware: []edgekit.Middleware{
 					recorder.Middleware,
 					panicking,
 				},
@@ -737,7 +751,7 @@ func TestStreamingReadFailureKeepsPartialObservations(t *testing.T) {
 				Sink: sink,
 			})
 			g := newGateway(t, edgekit.Config{
-				Middleware: []edgekit.Middleware{
+				SharedMiddleware: []edgekit.Middleware{
 					recorder.Middleware,
 				},
 				Hooks: edgekit.Hooks{
@@ -853,7 +867,7 @@ func TestWriteErrorIsSeparateFromGatewayFailure(t *testing.T) {
 			}
 
 			g := newGateway(t, edgekit.Config{
-				Middleware: middleware,
+				SharedMiddleware: middleware,
 				Hooks: edgekit.Hooks{
 					BeforeUpstream: []edgekit.BeforeUpstreamHook{
 						recorder,
@@ -924,7 +938,7 @@ func TestStreamingResponseFlushesBeforeCompletion(t *testing.T) {
 				Sink: sink,
 			})
 			g := newGateway(t, edgekit.Config{
-				Middleware: []edgekit.Middleware{
+				SharedMiddleware: []edgekit.Middleware{
 					recorder.Middleware,
 				},
 				Hooks: edgekit.Hooks{
@@ -1010,7 +1024,7 @@ func TestProtocolUpgradeKeepsHijackingAndServerManagement(t *testing.T) {
 		Sink: sink,
 	})
 	g := newGateway(t, edgekit.Config{
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			recorder.Middleware,
 		},
 		Hooks: edgekit.Hooks{
@@ -1122,7 +1136,7 @@ func TestConcurrentRecordsKeepRequestAndTraceIDsIsolated(t *testing.T) {
 		},
 	})
 	g := newGateway(t, edgekit.Config{
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			tracing,
 			recorder.Middleware,
 		},
@@ -1224,7 +1238,7 @@ func TestMissingMiddlewareGivesDegradedRecord(t *testing.T) {
 			Sink: sink,
 		})
 		g := newGateway(t, edgekit.Config{
-			Middleware: []edgekit.Middleware{
+			SharedMiddleware: []edgekit.Middleware{
 				recorder.Middleware,
 			},
 			Hooks: edgekit.Hooks{
@@ -1391,7 +1405,7 @@ func TestSinkPanicIsDropped(t *testing.T) {
 			}
 
 			g := newGateway(t, edgekit.Config{
-				Middleware: middleware,
+				SharedMiddleware: middleware,
 				Hooks: edgekit.Hooks{
 					BeforeUpstream: []edgekit.BeforeUpstreamHook{
 						recorder,
@@ -1417,7 +1431,11 @@ func TestSinkPanicIsDropped(t *testing.T) {
 			recovered := func() (recovered any) {
 				defer func() { recovered = recover() }()
 
-				g.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/missing", nil))
+				path := "/missing"
+				if tc.panicking {
+					path = "/api/panic"
+				}
+				g.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
 
 				return nil
 			}()

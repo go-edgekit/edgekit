@@ -73,21 +73,22 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 	first := &testHooks{
 		received: func(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
 			contexts = append(contexts, contextObservation{
-				phase: "RequestReceived",
+				phase: "RouteMatched",
 				ctx:   ctx,
 				rc:    rc,
 			})
-			if ctx.Value(derivedKey{}) != "derived" || r.Context() != ctx {
-				t.Error("RequestReceived did not get the context of global middleware")
+			if ctx.Value(derivedKey{}) != nil || r.Context() != ctx {
+				t.Error("RouteMatched got a later middleware context")
 			}
 
-			if _, ok := rc.RoutePrefix(); ok {
-				t.Error("RequestReceived ran after route matching")
+			if prefix, ok := rc.RoutePrefix(); !ok || prefix != "/api/" {
+				t.Error("RouteMatched has no fixed route")
 			}
 
-			if value, _ := edgekit.State(rc, key); value != "global" {
-				t.Errorf("RequestReceived state = %q, want %q", value, "global")
+			if _, ok := edgekit.State(rc, key); ok {
+				t.Error("RouteMatched got later middleware state")
 			}
+			edgekit.SetState(rc, key, "matched")
 
 			steps = append(steps, "received:first")
 
@@ -109,7 +110,7 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 
 			selected, ok := rc.SelectedUpstream()
 			if !ok || selected.String() != upstream.URL || out.URL().Host != selected.Host {
-				t.Errorf("BeforeUpstream did not get the rewritten request to the selected upstream")
+				t.Error("BeforeUpstream did not get the rewritten request to the selected upstream")
 			}
 
 			out.Header().Set("X-Outbound", "first")
@@ -156,7 +157,7 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 			}
 
 			if value, _ := edgekit.State(rc, key); value != "unwound" {
-				t.Errorf("RequestCompleted state = %q, want the state after global middleware returned", value)
+				t.Errorf("RequestCompleted state = %q, want the state after shared middleware returned", value)
 			}
 
 			if c.RoutePrefix != "/api/" || c.SelectedUpstream == nil || c.SelectedUpstream.String() != upstream.URL {
@@ -202,19 +203,22 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 			steps = append(steps, "completed:second")
 		},
 	}
-	global := func(next http.Handler) http.Handler {
+	sharedMiddleware := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var ok bool
 			shared, ok = edgekit.FromContext(r.Context())
 			if !ok || shared.StartTime().IsZero() || shared.StartTime().After(time.Now()) {
-				t.Fatal("gateway context is not ready before global middleware")
+				t.Fatal("gateway context is not ready before shared middleware")
 			}
 
-			edgekit.SetState(shared, key, "global")
-			steps = append(steps, "global:before")
+			if value, _ := edgekit.State(shared, key); value != "matched" {
+				t.Errorf("shared middleware state = %q, want state from RouteMatched", value)
+			}
+			edgekit.SetState(shared, key, "shared")
+			steps = append(steps, "shared:before")
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), derivedKey{}, "derived")))
 			edgekit.SetState(shared, key, "unwound")
-			steps = append(steps, "global:after")
+			steps = append(steps, "shared:after")
 		})
 	}
 	routeMiddleware := func(next http.Handler) http.Handler {
@@ -242,9 +246,9 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 				Middleware: []edgekit.Middleware{routeMiddleware},
 			},
 		},
-		Middleware: []edgekit.Middleware{global},
+		SharedMiddleware: []edgekit.Middleware{sharedMiddleware},
 		Hooks: edgekit.Hooks{
-			RequestReceived: []edgekit.RequestReceivedHook{
+			RouteMatched: []edgekit.RouteMatchedHook{
 				first,
 				second,
 			},
@@ -273,7 +277,7 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 	for _, observed := range contexts {
 		fromContext, ok := edgekit.FromContext(observed.ctx)
 		if !ok || fromContext != shared || observed.rc != shared {
-			t.Errorf("%s: gateway context is not the one of global middleware", observed.phase)
+			t.Errorf("%s: gateway context is not the one of shared middleware", observed.phase)
 		}
 	}
 
@@ -286,16 +290,16 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 	}
 
 	want := []string{
-		"global:before",
 		"received:first",
 		"received:second",
+		"shared:before",
 		"route:before",
 		"before:first",
 		"before:second",
 		"response:second",
 		"response:first",
 		"route:after",
-		"global:after",
+		"shared:after",
 		"completed:second",
 		"completed:first",
 	}
@@ -310,44 +314,50 @@ func TestCompletionOnEarlyExits(t *testing.T) {
 	key := edgekit.NewStateKey[string]()
 
 	for _, tc := range []struct {
-		name         string
-		path         string
-		globalDeny   bool
-		routeDeny    bool
-		hookErr      error
-		status       int
-		wantReceived bool
-		wantRoute    string
-		wantReason   edgekit.RejectionReason
-		wantPhase    edgekit.Phase
+		name           string
+		path           string
+		sharedDeny     bool
+		routeDeny      bool
+		hookErr        error
+		status         int
+		wantReceived   bool
+		wantMiddleware bool
+		wantRoute      string
+		wantReason     edgekit.RejectionReason
+		wantPhase      edgekit.Phase
 	}{
 		{
-			name:       "global middleware response",
-			path:       "/api/x",
-			globalDeny: true,
-			status:     http.StatusUnauthorized,
+			name:           "shared middleware response",
+			path:           "/api/x",
+			sharedDeny:     true,
+			status:         http.StatusUnauthorized,
+			wantReceived:   true,
+			wantMiddleware: true,
+			wantRoute:      "/api/",
 		},
 		{
-			name:         "route middleware response",
-			path:         "/api/x",
-			routeDeny:    true,
-			status:       http.StatusForbidden,
-			wantReceived: true,
-			wantRoute:    "/api/",
+			name:           "route middleware response",
+			path:           "/api/x",
+			routeDeny:      true,
+			status:         http.StatusForbidden,
+			wantMiddleware: true,
+			wantReceived:   true,
+			wantRoute:      "/api/",
 		},
 		{
-			name:         "RequestReceived error",
+			name:         "RouteMatched error",
 			path:         "/api/x",
 			hookErr:      errors.New("denied"),
 			status:       http.StatusInternalServerError,
 			wantReceived: true,
-			wantPhase:    edgekit.PhaseRequestReceived,
+			wantPhase:    edgekit.PhaseRouteMatched,
+			wantRoute:    "/api/",
 		},
 		{
 			name:         "routing miss",
 			path:         "/missing",
 			status:       http.StatusNotFound,
-			wantReceived: true,
+			wantReceived: false,
 			wantReason:   edgekit.ReasonNoRoute,
 		},
 		{
@@ -355,7 +365,7 @@ func TestCompletionOnEarlyExits(t *testing.T) {
 			name:         "missing trailing slash",
 			path:         "/api",
 			status:       http.StatusNotFound,
-			wantReceived: true,
+			wantReceived: false,
 			wantReason:   edgekit.ReasonNoRoute,
 		},
 	} {
@@ -382,23 +392,23 @@ func TestCompletionOnEarlyExits(t *testing.T) {
 					return nil, nil
 				},
 				completed: func(_ context.Context, rc *edgekit.RequestContext, c edgekit.Completion) {
-					if !unwound {
-						t.Error("completion ran before global middleware returned")
+					if unwound != tc.wantMiddleware {
+						t.Errorf("middleware unwound = %v, want %v", unwound, tc.wantMiddleware)
 					}
 
 					stateAtCompletion, _ = edgekit.State(rc, key)
 					completed = append(completed, c)
 				},
 			}
-			global := func(next http.Handler) http.Handler {
+			sharedMiddleware := func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					defer func() {
 						unwound = true
 					}()
 
 					rc, _ := edgekit.FromContext(r.Context())
-					edgekit.SetState(rc, key, "global")
-					if tc.globalDeny {
+					edgekit.SetState(rc, key, "shared")
+					if tc.sharedDeny {
 						http.Error(w, "unauthorized", http.StatusUnauthorized)
 
 						return
@@ -423,8 +433,8 @@ func TestCompletionOnEarlyExits(t *testing.T) {
 						Middleware: routeMiddleware,
 					},
 				},
-				Middleware: []edgekit.Middleware{global},
-				Hooks:      allPhases(hooks),
+				SharedMiddleware: []edgekit.Middleware{sharedMiddleware},
+				Hooks:            allPhases(hooks),
 			})
 
 			before := requests.Load()
@@ -432,7 +442,7 @@ func TestCompletionOnEarlyExits(t *testing.T) {
 			g.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.path, nil))
 
 			if w.Code != tc.status || received != tc.wantReceived || later {
-				t.Errorf("status = %d, RequestReceived ran = %v, later hooks ran = %v; want %d, %v, false", w.Code, received, later, tc.status, tc.wantReceived)
+				t.Errorf("status = %d, RouteMatched ran = %v, later hooks ran = %v; want %d, %v, false", w.Code, received, later, tc.status, tc.wantReceived)
 			}
 
 			if got := requests.Load() - before; got != 0 {
@@ -455,10 +465,12 @@ func TestCompletionOnEarlyExits(t *testing.T) {
 				t.Errorf("completion failure = %+v, want the hook error in %v", c.Failure, tc.wantPhase)
 			}
 
-			// A routing rejection keeps the state that global middleware set
-			// (ADR-0018).
-			if stateAtCompletion != "global" {
-				t.Errorf("state at completion = %q, want %q", stateAtCompletion, "global")
+			wantState := ""
+			if tc.wantMiddleware {
+				wantState = "shared"
+			}
+			if stateAtCompletion != wantState {
+				t.Errorf("state at completion = %q, want %q", stateAtCompletion, wantState)
 			}
 		})
 	}
@@ -504,14 +516,14 @@ func TestSecureDefaultRejectionReachesCompletion(t *testing.T) {
 				Upstream: static(t, upstream.URL),
 			},
 		},
-		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
+		SharedMiddleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				entered.Add(1)
 				next.ServeHTTP(w, r)
 			})
 		}},
 		Hooks: edgekit.Hooks{
-			RequestReceived: []edgekit.RequestReceivedHook{
+			RouteMatched: []edgekit.RouteMatchedHook{
 				processingHooks,
 			},
 			BeforeUpstream: []edgekit.BeforeUpstreamHook{
@@ -621,7 +633,7 @@ func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
 		wantLater    []string
 	}{
 		{
-			phase:        edgekit.PhaseRequestReceived,
+			phase:        edgekit.PhaseRouteMatched,
 			wantRequests: 0,
 		},
 		{
@@ -645,7 +657,7 @@ func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
 			var laterRan []string
 			first := &testHooks{}
 			switch tc.phase {
-			case edgekit.PhaseRequestReceived:
+			case edgekit.PhaseRouteMatched:
 				first.received = func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 					return nil, fmt.Errorf("lookup: %w", secret)
 				}
@@ -677,7 +689,7 @@ func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
 			hooks, completed := completions()
 
 			phaseHooks := edgekit.Hooks{
-				RequestReceived: []edgekit.RequestReceivedHook{
+				RouteMatched: []edgekit.RouteMatchedHook{
 					first,
 					second,
 				},
@@ -793,7 +805,7 @@ func TestCompletionDuringPanicUnwinding(t *testing.T) {
 						Upstream: static(t, "http://unused.test"),
 					},
 				},
-				Middleware: []edgekit.Middleware{unwinding(&unwound), panicking},
+				SharedMiddleware: []edgekit.Middleware{unwinding(&unwound), panicking},
 				Hooks: edgekit.Hooks{
 					RequestCompleted: []edgekit.RequestCompletedHook{
 						hooks,
@@ -937,7 +949,7 @@ func TestExtensionSharesStateBetweenMiddlewareAndHooks(t *testing.T) {
 				Upstream: static(t, upstream.URL),
 			},
 		},
-		Middleware: []edgekit.Middleware{tag.Middleware},
+		SharedMiddleware: []edgekit.Middleware{tag.Middleware},
 		Hooks: edgekit.Hooks{
 			UpstreamResponse: []edgekit.UpstreamResponseHook{
 				tag,
@@ -976,8 +988,8 @@ func TestExtensionSharesStateBetweenMiddlewareAndHooks(t *testing.T) {
 			}
 
 			record := receive(t, tag.records)
-			if record.tag != "example" {
-				t.Errorf("completion tag = %q, want the state that middleware set", record.tag)
+			if record.tag != tc.wantHeader {
+				t.Errorf("completion tag = %q, want %q", record.tag, tc.wantHeader)
 			}
 
 			// An upstream 503 is an HTTP response, not a gateway failure.
@@ -1024,7 +1036,7 @@ func TestTypedStateIsolationAndNilValues(t *testing.T) {
 				Upstream: static(t, "http://unused.test"),
 			},
 		},
-		Middleware: []edgekit.Middleware{func(http.Handler) http.Handler {
+		SharedMiddleware: []edgekit.Middleware{func(http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				rc, _ := edgekit.FromContext(r.Context())
 				_, ok := edgekit.State(rc, first)
@@ -1177,7 +1189,10 @@ func TestConcurrentRequestStateIsolation(t *testing.T) {
 		received: func(_ context.Context, rc *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
 			edgekit.SetState(rc, key, r.Header.Get("X-Test-Request"))
 
-			return nil, nil
+			return &edgekit.Rejection{
+				Status: http.StatusForbidden,
+				Reason: "test.done",
+			}, nil
 		},
 		completed: func(_ context.Context, rc *edgekit.RequestContext, _ edgekit.Completion) {
 			value, _ := edgekit.State(rc, key)
@@ -1199,7 +1214,7 @@ func TestConcurrentRequestStateIsolation(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range requests {
 		wg.Go(func() {
-			r := httptest.NewRequest(http.MethodGet, "/missing", nil)
+			r := httptest.NewRequest(http.MethodGet, "/api/state", nil)
 			r.Header.Set("X-Test-Request", fmt.Sprint(i))
 			g.ServeHTTP(httptest.NewRecorder(), r)
 		})
@@ -1228,8 +1243,8 @@ func TestCancellationReachesHooks(t *testing.T) {
 		},
 		completed: func(ctx context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
 			completionErr = ctx.Err()
-			if c.Failure == nil || c.Failure.Phase != edgekit.PhaseRequestReceived || !errors.Is(c.Failure.Err, context.Canceled) {
-				t.Errorf("completion failure = %+v, want the cancellation in RequestReceived", c.Failure)
+			if c.Failure == nil || c.Failure.Phase != edgekit.PhaseRouteMatched || !errors.Is(c.Failure.Err, context.Canceled) {
+				t.Errorf("completion failure = %+v, want the cancellation in RouteMatched", c.Failure)
 			}
 		},
 	}
@@ -1282,7 +1297,7 @@ func TestCompletionOnOutboundPanic(t *testing.T) {
 			},
 		},
 		Hooks: edgekit.Hooks{
-			RequestReceived: []edgekit.RequestReceivedHook{
+			RouteMatched: []edgekit.RouteMatchedHook{
 				hooks,
 			},
 			BeforeUpstream: []edgekit.BeforeUpstreamHook{
@@ -1342,13 +1357,14 @@ func TestMissingGatewayContextFailsClosed(t *testing.T) {
 
 	for _, tc := range []struct {
 		name      string
-		global    []edgekit.Middleware
+		shared    []edgekit.Middleware
 		route     []edgekit.Middleware
 		wantRoute string
 	}{
 		{
-			name:   "global middleware",
-			global: []edgekit.Middleware{dropContext},
+			name:      "shared middleware",
+			shared:    []edgekit.Middleware{dropContext},
+			wantRoute: "/api/",
 		},
 		{
 			name:      "route middleware",
@@ -1368,7 +1384,7 @@ func TestMissingGatewayContextFailsClosed(t *testing.T) {
 						Middleware: tc.route,
 					},
 				},
-				Middleware: tc.global,
+				SharedMiddleware: tc.shared,
 				Hooks: edgekit.Hooks{
 					RequestCompleted: []edgekit.RequestCompletedHook{
 						hooks,
@@ -1445,7 +1461,7 @@ func TestClientCancellationReachesUpstreamAndCompletion(t *testing.T) {
 					},
 				},
 				Transport: testTransport(t),
-				Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
+				SharedMiddleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						defer unwound.Store(true)
 
@@ -1544,8 +1560,8 @@ func TestResponseHeaderTimeoutReachesCompletion(t *testing.T) {
 				Upstream: static(t, upstream.URL),
 			},
 		},
-		Transport:  transport,
-		Middleware: []edgekit.Middleware{unwinding(&unwound)},
+		Transport:        transport,
+		SharedMiddleware: []edgekit.Middleware{unwinding(&unwound)},
 		Hooks: edgekit.Hooks{
 			RequestCompleted: []edgekit.RequestCompletedHook{
 				hooks,

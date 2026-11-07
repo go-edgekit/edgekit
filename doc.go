@@ -5,7 +5,7 @@
 // before any extension runs. It contains no business policy, such as
 // authentication, rate limits, or quotas. Extensions add such policy through
 // the public extension points: [Middleware], the lifecycle hooks
-// ([RequestReceivedHook], [BeforeUpstreamHook], [UpstreamResponseHook], and
+// ([RouteMatchedHook], [BeforeUpstreamHook], [UpstreamResponseHook], and
 // [RequestCompletedHook]), [UpstreamSelector], and the transport
 // ([Config.Transport]). Middleware and hooks of one request share typed
 // request state on the [RequestContext].

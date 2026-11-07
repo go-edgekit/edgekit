@@ -139,7 +139,7 @@ func TestInvalidAdmissionConfiguration(t *testing.T) {
 		problem string
 	}{
 		{
-			name: "gateway budget not made with NewAdmissionBudget",
+			name: "unconstructed gateway budget",
 			cfg: edgekit.Config{
 				Routes: []edgekit.Route{
 					{
@@ -152,7 +152,7 @@ func TestInvalidAdmissionConfiguration(t *testing.T) {
 			problem: "admission budget: is not made with NewAdmissionBudget",
 		},
 		{
-			name: "route budget not made with NewAdmissionBudget",
+			name: "unconstructed route budget",
 			cfg: edgekit.Config{
 				Routes: []edgekit.Route{
 					{
@@ -266,7 +266,7 @@ func TestSaturationRejectsWithoutQueueOrBodyRead(t *testing.T) {
 		},
 		Transport: blockingTransport(entered, release),
 		Admission: budget(t, 1),
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			observer.Middleware,
 			func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -277,8 +277,8 @@ func TestSaturationRejectsWithoutQueueOrBodyRead(t *testing.T) {
 			},
 		},
 		Hooks: edgekit.Hooks{
-			RequestReceived: []edgekit.RequestReceivedHook{
-				edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			RouteMatched: []edgekit.RouteMatchedHook{
+				edgekit.RouteMatchedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 					received.Add(1)
 
 					return nil, nil
@@ -311,21 +311,27 @@ func TestSaturationRejectsWithoutQueueOrBodyRead(t *testing.T) {
 	}
 
 	if body.reads.Load() != 0 || body.closes.Load() != 0 || received.Load() != 1 {
-		t.Errorf("request body reads = %d, closes = %d, RequestReceived calls = %d; want 0, 0, 1", body.reads.Load(), body.closes.Load(), received.Load())
+		t.Errorf("request body reads = %d, closes = %d, RouteMatched calls = %d; want 0, 0, 1", body.reads.Load(), body.closes.Load(), received.Load())
 	}
 
 	c := got.completion
-	if !got.unwound || c.RejectionReason != edgekit.ReasonAdmissionSaturated || c.Failure != nil || c.Aborted || c.RoutePrefix != "" || c.SelectedUpstream != nil {
-		t.Errorf("RequestCompleted() after unwind %v = %+v; want a saturation rejection after unwind, without route or upstream", got.unwound, c)
+	if got.unwound || c.RejectionReason != edgekit.ReasonAdmissionSaturated || c.Failure != nil || c.Aborted || c.RoutePrefix != "" || c.SelectedUpstream != nil {
+		t.Errorf("RequestCompleted() after unwind %v = %+v; want saturation before processing middleware, without route or upstream", got.unwound, c)
 	}
 
-	if status := receive(t, observer.statuses); status != http.StatusServiceUnavailable {
-		t.Errorf("observing middleware saw %d, want 503", status)
+	select {
+	case status := <-observer.statuses:
+		t.Errorf("processing middleware observed status %d for a saturated gateway, want no observation", status)
+	default:
 	}
 
 	finish()
 	if w := receive(t, first); w.Code != http.StatusOK || w.Body.String() != "ok" {
 		t.Errorf("ServeHTTP() of the active request = %d %q, want 200 ok", w.Code, w.Body.String())
+	}
+
+	if status := receive(t, observer.statuses); status != http.StatusOK {
+		t.Errorf("observing middleware saw %d, want 200 for the admitted request", status)
 	}
 
 	got = receive(t, completed)
@@ -337,6 +343,7 @@ func TestSaturationRejectsWithoutQueueOrBodyRead(t *testing.T) {
 func TestAdmissionPassesRequestAndWriter(t *testing.T) {
 	var outerRequest *http.Request
 	var outerWriter http.ResponseWriter
+	var matchedRequest *http.Request
 	g := newGateway(t, edgekit.Config{
 		Routes: []edgekit.Route{
 			{
@@ -357,19 +364,23 @@ func TestAdmissionPassesRequestAndWriter(t *testing.T) {
 			},
 		},
 		Admission: budget(t, 1),
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					outerRequest, outerWriter = r, w
+					if matchedRequest != r {
+						t.Error("shared middleware got another request than the route hook")
+					}
 					next.ServeHTTP(w, r)
 				})
 			},
 		},
 		Hooks: edgekit.Hooks{
-			RequestReceived: []edgekit.RequestReceivedHook{
-				edgekit.RequestReceivedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
-					if r != outerRequest {
-						t.Error("RequestReceived hook got another request, want the original one")
+			RouteMatched: []edgekit.RouteMatchedHook{
+				edgekit.RouteMatchedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
+					matchedRequest = r
+					if outerRequest != nil {
+						t.Error("shared middleware ran before RouteMatched")
 					}
 
 					return nil, nil

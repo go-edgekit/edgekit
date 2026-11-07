@@ -13,8 +13,9 @@ import (
 // There is no queue. When all slots are in use, the gateway rejects the
 // request with 503 Service Unavailable and [ReasonAdmissionSaturated], and
 // does not read or close its body. A request holds its slot until the
-// protected part of handling returns or unwinds: also while the body streams,
-// while the transport waits for a pooled connection, and while an upgraded
+// protected part of handling returns or unwinds: also during request
+// buffering and its storage lifetime, while the body streams, while the
+// transport waits for a pooled connection, and while an upgraded
 // connection is active. A cancellation alone does not release the slot. A
 // panic releases the slot, and the panic continues to unwind.
 //

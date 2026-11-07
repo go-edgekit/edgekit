@@ -30,11 +30,11 @@ func checkConfig(cfg Config) (compiledHooks, map[string]struct{}, []error) {
 		problems = append(problems, invalid("transport: %w", err))
 	}
 
-	problems = append(problems, checkRoutes(cfg.Routes, cfg.Admission)...)
+	problems = append(problems, checkRoutes(cfg.Routes, cfg.Admission, cfg.BodyLimit.resolve(DefaultBodyLimit))...)
 	problems = append(problems, checkProtections(cfg)...)
 
-	if i := slices.IndexFunc(cfg.Middleware, isNil); i >= 0 {
-		problems = append(problems, invalid("middleware %d: is nil", i))
+	if i := slices.IndexFunc(cfg.SharedMiddleware, isNil); i >= 0 {
+		problems = append(problems, invalid("shared middleware %d: is nil", i))
 	}
 
 	return compiled, managedHeaders, problems
@@ -134,7 +134,8 @@ func checkBudget(b *AdmissionBudget) error {
 
 // checkRoutes validates routes without calling middleware. A route must not
 // use gatewayBudget, because then one request takes two slots of it.
-func checkRoutes(routes []Route, gatewayBudget *AdmissionBudget) []error {
+// gatewayLimit is the resolved gateway body limit that routes inherit.
+func checkRoutes(routes []Route, gatewayBudget *AdmissionBudget, gatewayLimit int64) []error {
 	var problems []error
 
 	if len(routes) == 0 {
@@ -167,6 +168,10 @@ func checkRoutes(routes []Route, gatewayBudget *AdmissionBudget) []error {
 			problems = append(problems, invalid("route %d: admission budget: %w", i, err))
 		} else if r.Admission != nil && r.Admission == gatewayBudget {
 			problems = append(problems, invalid("route %d: admission budget: is also the gateway budget", i))
+		}
+
+		if err := checkBuffering(r.RequestBuffering, r.BodyLimit.resolve(gatewayLimit)); err != nil {
+			problems = append(problems, invalid("route %d: request buffering: %w", i, err))
 		}
 	}
 

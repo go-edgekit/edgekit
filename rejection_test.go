@@ -29,7 +29,7 @@ var limited = edgekit.Rejection{
 
 func TestHookRejectionStopsPhase(t *testing.T) {
 	for _, phase := range []string{
-		"request_received",
+		"route_matched",
 		"before_upstream",
 		"upstream_response",
 	} {
@@ -46,7 +46,7 @@ func TestHookRejectionStopsPhase(t *testing.T) {
 
 			first, second := &testHooks{}, &testHooks{}
 			switch phase {
-			case "request_received":
+			case "route_matched":
 				first.received = func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 					return &limited, nil
 				}
@@ -89,9 +89,9 @@ func TestHookRejectionStopsPhase(t *testing.T) {
 						Upstream: static(t, upstream.URL),
 					},
 				},
-				Middleware: []edgekit.Middleware{unwinding(&unwound), middleware},
+				SharedMiddleware: []edgekit.Middleware{unwinding(&unwound), middleware},
 				Hooks: edgekit.Hooks{
-					RequestReceived: []edgekit.RequestReceivedHook{
+					RouteMatched: []edgekit.RouteMatchedHook{
 						first,
 						second,
 					},
@@ -124,8 +124,12 @@ func TestHookRejectionStopsPhase(t *testing.T) {
 				t.Errorf("Retry-After = %q, want the rejection value only", got)
 			}
 
-			if got := w.Header().Get("Vary"); got != "Origin" {
-				t.Errorf("ServeHTTP() Vary = %q, want Origin", got)
+			wantVary := "Origin"
+			if phase == "route_matched" {
+				wantVary = ""
+			}
+			if got := w.Header().Get("Vary"); got != wantVary {
+				t.Errorf("ServeHTTP() Vary = %q, want %q", got, wantVary)
 			}
 
 			if got := w.Header().Get("X-Upstream"); got != "" {
@@ -157,8 +161,8 @@ func TestHookRejectionStopsPhase(t *testing.T) {
 				t.Error("RequestCompleted() Aborted = true, want false")
 			}
 
-			if !unwoundAtCompletion {
-				t.Error("RequestCompleted() middleware unwound = false, want true")
+			if wantUnwound := phase != "route_matched"; unwoundAtCompletion != wantUnwound {
+				t.Errorf("RequestCompleted() middleware unwound = %v, want %v", unwoundAtCompletion, wantUnwound)
 			}
 		})
 	}
@@ -195,7 +199,7 @@ func TestRejectionHeadersAreSanitized(t *testing.T) {
 					"X-Allowed":         {"a\tb"},
 				},
 			}
-			hooks := edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			hooks := edgekit.RouteMatchedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 				return &rejection, nil
 			})
 			server := httptest.NewUnstartedServer(newGateway(t, edgekit.Config{
@@ -206,7 +210,7 @@ func TestRejectionHeadersAreSanitized(t *testing.T) {
 					},
 				},
 				Hooks: edgekit.Hooks{
-					RequestReceived: []edgekit.RequestReceivedHook{
+					RouteMatched: []edgekit.RouteMatchedHook{
 						hooks,
 					},
 				},
@@ -299,7 +303,7 @@ func TestHookResultCombinations(t *testing.T) {
 	}
 
 	for _, stage := range []string{
-		"request_received",
+		"route_matched",
 		"before_upstream",
 		"upstream_response",
 	} {
@@ -347,7 +351,7 @@ func TestHookResultCombinations(t *testing.T) {
 					return tc.rejection, tc.err
 				}
 				switch stage {
-				case "request_received":
+				case "route_matched":
 					hooks.received = func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 						return result()
 					}
@@ -370,7 +374,7 @@ func TestHookResultCombinations(t *testing.T) {
 						},
 					},
 					Hooks: edgekit.Hooks{
-						RequestReceived: []edgekit.RequestReceivedHook{
+						RouteMatched: []edgekit.RouteMatchedHook{
 							hooks,
 						},
 						BeforeUpstream: []edgekit.BeforeUpstreamHook{
@@ -572,10 +576,10 @@ func TestInvalidRejectionFails(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			output := captureDiagnostics(t)
 			later := false
-			hooks := edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			hooks := edgekit.RouteMatchedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 				return &tc.rejection, nil
 			})
-			laterHooks := edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			laterHooks := edgekit.RouteMatchedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 				later = true
 
 				return nil, nil
@@ -589,7 +593,7 @@ func TestInvalidRejectionFails(t *testing.T) {
 					},
 				},
 				Hooks: edgekit.Hooks{
-					RequestReceived: []edgekit.RequestReceivedHook{
+					RouteMatched: []edgekit.RouteMatchedHook{
 						hooks,
 						laterHooks,
 					},
@@ -633,8 +637,8 @@ func TestInvalidRejectionFails(t *testing.T) {
 				t.Fatal("RequestCompleted() Failure = nil, want an invalid rejection")
 			}
 
-			if c.Failure.Phase != edgekit.PhaseRequestReceived {
-				t.Errorf("RequestCompleted() Failure.Phase = %v, want RequestReceived", c.Failure.Phase)
+			if c.Failure.Phase != edgekit.PhaseRouteMatched {
+				t.Errorf("RequestCompleted() Failure.Phase = %v, want RouteMatched", c.Failure.Phase)
 			}
 
 			if !errors.Is(c.Failure.Err, edgekit.ErrInvalidRejection) {
@@ -892,7 +896,7 @@ func TestValidRejectionBoundaries(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hooks := edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			hooks := edgekit.RouteMatchedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 				return &tc.rejection, nil
 			})
 			completionHooks, completed := completions()
@@ -904,7 +908,7 @@ func TestValidRejectionBoundaries(t *testing.T) {
 					},
 				},
 				Hooks: edgekit.Hooks{
-					RequestReceived: []edgekit.RequestReceivedHook{
+					RouteMatched: []edgekit.RouteMatchedHook{
 						hooks,
 					},
 					RequestCompleted: []edgekit.RequestCompletedHook{
@@ -947,7 +951,7 @@ func TestSharedRejectionIsNotChanged(t *testing.T) {
 		},
 	}
 	want := shared.Header.Clone()
-	hooks := edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+	hooks := edgekit.RouteMatchedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 		return &shared, nil
 	})
 	g := newGateway(t, edgekit.Config{
@@ -958,7 +962,7 @@ func TestSharedRejectionIsNotChanged(t *testing.T) {
 			},
 		},
 		Hooks: edgekit.Hooks{
-			RequestReceived: []edgekit.RequestReceivedHook{
+			RouteMatched: []edgekit.RouteMatchedHook{
 				hooks,
 			},
 		},

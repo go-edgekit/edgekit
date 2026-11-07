@@ -168,7 +168,7 @@ func newTrailerForwarding(t *testing.T, setup trailerSetup) *trailerForwarding {
 		Transport:        transport,
 		ManagedHeaders:   []string{"X-Customer"},
 		HeaderNamePolicy: edgekit.HeaderNameDrop,
-		Middleware:       middleware,
+		SharedMiddleware: middleware,
 		Hooks: edgekit.Hooks{
 			RequestCompleted: []edgekit.RequestCompletedHook{
 				collector,
@@ -208,7 +208,7 @@ func TestHTTP1RequestTrailersAreCheckedAndForwarded(t *testing.T) {
 			upstream: "Kept=v Late=w",
 		},
 		{
-			name: "undeclared trailers only and middleware that reads the body",
+			name: "undeclared trailers with a body reader",
 			setup: trailerSetup{
 				middlewareReads: true,
 			},
@@ -232,7 +232,7 @@ func TestHTTP1RequestTrailersAreCheckedAndForwarded(t *testing.T) {
 			upstream: "Kept=v",
 		},
 		{
-			name: "to http1 with middleware that reads the body",
+			name: "to http1 with a body reader",
 			setup: trailerSetup{
 				middlewareReads: true,
 			},
@@ -240,7 +240,7 @@ func TestHTTP1RequestTrailersAreCheckedAndForwarded(t *testing.T) {
 			upstream: "Kept=v Late=w",
 		},
 		{
-			name: "middleware that reads the body and stripped headers",
+			name: "body reader and stripped headers",
 			setup: trailerSetup{
 				middlewareReads: true,
 			},
@@ -311,7 +311,7 @@ func TestHTTP2RequestTrailersAreCheckedAndForwarded(t *testing.T) {
 			upstream: "Kept=v",
 		},
 		{
-			name: "middleware that reads the body",
+			name: "body reader",
 			setup: trailerSetup{
 				inboundHTTP2:    true,
 				middlewareReads: true,
@@ -408,7 +408,7 @@ func sendLateInvalidTrailer(t *testing.T, middleware edgekit.Middleware) lateTra
 		},
 	}
 	if middleware != nil {
-		cfg.Middleware = []edgekit.Middleware{middleware}
+		cfg.SharedMiddleware = []edgekit.Middleware{middleware}
 	}
 
 	ts := startServer(t, newGateway(t, cfg), edgekit.ServerConfig{}, serverOptions{})
@@ -535,7 +535,7 @@ func TestMiddlewareOwnsOutboundTrailers(t *testing.T) {
 			upstream:          "Kept=v Late=w",
 		},
 		{
-			name: "declared trailer deleted from a copy before EOF",
+			name: "declared trailer deleted from a copy",
 			change: func(r *http.Request) *http.Request {
 				out := r.Clone(r.Context())
 				delete(out.Trailer, "Kept")
@@ -546,7 +546,7 @@ func TestMiddlewareOwnsOutboundTrailers(t *testing.T) {
 			upstream:          "Late=w",
 		},
 		{
-			name: "mixed-case value set on a copy before EOF",
+			name: "mixed-case value on a copy",
 			change: func(r *http.Request) *http.Request {
 				out := r.Clone(r.Context())
 				out.Trailer["kept"] = []string{"middleware"}
@@ -589,7 +589,7 @@ func TestMiddlewareOwnsOutboundTrailers(t *testing.T) {
 			upstream: "Late=w",
 		},
 		{
-			name: "trailer value set by middleware under a name in lowercase",
+			name: "middleware value under a lowercase name",
 			change: func(r *http.Request) *http.Request {
 				out := r.Clone(r.Context())
 				out.Trailer["kept"] = []string{"middleware"}
@@ -599,7 +599,7 @@ func TestMiddlewareOwnsOutboundTrailers(t *testing.T) {
 			upstream: "Kept=middleware Late=w",
 		},
 		{
-			name: "declared trailer deleted and set again in mixed case",
+			name: "declared trailer set again in mixed case",
 			change: func(r *http.Request) *http.Request {
 				out := r.Clone(r.Context())
 				delete(out.Trailer, "Kept")
@@ -631,7 +631,7 @@ func TestMiddlewareOwnsOutboundTrailers(t *testing.T) {
 					},
 				},
 				Transport: transport,
-				Middleware: []edgekit.Middleware{
+				SharedMiddleware: []edgekit.Middleware{
 					func(next http.Handler) http.Handler {
 						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 							out := tc.change(r)
@@ -1033,7 +1033,7 @@ func TestEarlyResponseWithLateTrailers(t *testing.T) {
 
 					return "text/plain", nil
 				},
-				Middleware: []edgekit.Middleware{
+				SharedMiddleware: []edgekit.Middleware{
 					func(next http.Handler) http.Handler {
 						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 							if err := http.NewResponseController(w).EnableFullDuplex(); err != nil {
@@ -1092,7 +1092,7 @@ func TestForbiddenTrailersAreRemoved(t *testing.T) {
 			},
 		},
 		Transport: transport,
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					names := make([]string, 0, len(r.Trailer))

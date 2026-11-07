@@ -1,6 +1,6 @@
 # ADR-0018: Observe gateway-owned rejections at completion
 
-- **Status:** Accepted
+- **Status:** Accepted; handling order and early-state availability superseded in part by [ADR-0031](0031-route-first-request-bodies.md)
 - **Date:** 2026-11-03
 - **Decision owners:** Project maintainers
 - **Amends:** [ADR-0004](0004-compose-http-middleware-and-hooks.md) (ordering) and [ADR-0009](0009-outcomes-errors-and-early-responses.md) (completion guarantee)

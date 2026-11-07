@@ -44,7 +44,7 @@ func TestRepeatedMiddlewareKeepsOneObservation(t *testing.T) {
 	}
 
 	g := newGateway(t, edgekit.Config{
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			recorder.Middleware,
 			observeID,
 			recorder.Middleware,
@@ -146,7 +146,7 @@ func TestRequestIDEndsAtCompletion(t *testing.T) {
 			var duringID, completionID string
 			var duringOK, completionOK bool
 			g := newGateway(t, edgekit.Config{
-				Middleware: []edgekit.Middleware{
+				SharedMiddleware: []edgekit.Middleware{
 					recorder.Middleware,
 					func(http.Handler) http.Handler {
 						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -238,7 +238,7 @@ func TestRetainedRecordDoesNotChange(t *testing.T) {
 		Sink: sink,
 	})
 	g := newGateway(t, edgekit.Config{
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			recorder.Middleware,
 		},
 		Hooks: edgekit.Hooks{

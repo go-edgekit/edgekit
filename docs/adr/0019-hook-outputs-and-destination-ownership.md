@@ -1,6 +1,6 @@
 # ADR-0019: Own the destination structurally and sanitize after hooks
 
-- **Status:** Accepted
+- **Status:** Accepted; path/query rewrite configuration and available-trailer checks superseded in part by [ADR-0031](0031-route-first-request-bodies.md)
 - **Date:** 2026-11-03
 - **Decision owners:** Project maintainers
 - **Amends:** [ADR-0003](0003-proxy-lifecycle-hooks.md) (the `BeforeUpstream` capability)

@@ -34,7 +34,7 @@ func TestSecureDefaultsRejectBeforeMiddleware(t *testing.T) {
 				Upstream: static(t, upstream.URL),
 			},
 		},
-		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
+		SharedMiddleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				entered.Add(1)
 				next.ServeHTTP(w, r)
@@ -366,7 +366,7 @@ func TestSecureDefaultsRejectBeforeMiddleware(t *testing.T) {
 			status: http.StatusOK,
 		},
 		{
-			name:   "only a later upgrade value is not printable",
+			name:   "unprintable later upgrade value",
 			target: "/api/x",
 			header: http.Header{"Connection": {"Upgrade"}, "Upgrade": {"echo", "web\tsocket"}},
 			status: http.StatusOK,
@@ -517,7 +517,7 @@ func TestForwardingTrustAndHopByHopHeaders(t *testing.T) {
 					},
 				},
 				ManagedHeaders: []string{"x-user"},
-				Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
+				SharedMiddleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						middlewareSaw = r.Header.Clone()
 						r = r.Clone(r.Context())
@@ -670,7 +670,7 @@ func TestConnectionCannotRemoveManagedHeader(t *testing.T) {
 			},
 		},
 		ManagedHeaders: []string{"X-User"},
-		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
+		SharedMiddleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				r = r.Clone(r.Context())
 				r.Header.Set("X-User", "authenticated")
@@ -808,7 +808,7 @@ func TestGatewayDoesNotChangeInboundRequest(t *testing.T) {
 			},
 		},
 		ManagedHeaders: []string{"X-User"},
-		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
+		SharedMiddleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				r = r.Clone(r.Context())
 				r.Header.Set("X-User", "authenticated")
@@ -929,9 +929,8 @@ func TestMiddlewareQueryIsForwardedUnchanged(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	// Middleware is trusted, so its query reaches the upstream also when the
-	// secure defaults reject the same query from a client.
-	const query = "a=1;b=2&c=%zz"
+	// Valid rewrites keep their escaped representation on the wire.
+	const query = "a=1&b=%3B&c=%25zz"
 	g := newGateway(t, edgekit.Config{
 		Routes: []edgekit.Route{
 			{
@@ -939,7 +938,7 @@ func TestMiddlewareQueryIsForwardedUnchanged(t *testing.T) {
 				Upstream: static(t, upstream.URL),
 			},
 		},
-		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
+		SharedMiddleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				r = r.Clone(r.Context())
 				r.URL.RawQuery = query
@@ -993,7 +992,7 @@ func TestDeclaredManagedHeadersAreRemoved(t *testing.T) {
 		HeaderOwners: []edgekit.HeaderOwner{
 			headerOwner{"x-customer"},
 		},
-		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
+		SharedMiddleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				r = r.Clone(r.Context())
 				r.Header.Set("X-Customer", "verified")

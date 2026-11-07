@@ -199,7 +199,7 @@ func failingStages(t *testing.T, stage edgekit.Phase, err error, middleware []ed
 
 	hooks := &testHooks{}
 	switch stage {
-	case edgekit.PhaseRequestReceived:
+	case edgekit.PhaseRouteMatched:
 		hooks.received = func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 			return nil, err
 		}
@@ -213,7 +213,7 @@ func failingStages(t *testing.T, stage edgekit.Phase, err error, middleware []ed
 		}
 	case edgekit.PhaseUpstreamSelection, edgekit.PhaseRoundTrip:
 		// The selector and the transport below fail.
-	case edgekit.PhaseUnknown, edgekit.PhaseProtocolSwitch, edgekit.PhaseResponseBody:
+	case edgekit.PhaseUnknown, edgekit.PhaseProtocolSwitch, edgekit.PhaseResponseBody, edgekit.PhaseRequestBuffering:
 		t.Fatalf("failingStages() does not support %v", stage)
 	}
 
@@ -244,10 +244,10 @@ func failingStages(t *testing.T, stage edgekit.Phase, err error, middleware []ed
 				Upstream: selector,
 			},
 		},
-		Middleware: middleware,
-		Transport:  transport,
+		SharedMiddleware: middleware,
+		Transport:        transport,
 		Hooks: edgekit.Hooks{
-			RequestReceived: []edgekit.RequestReceivedHook{
+			RouteMatched: []edgekit.RouteMatchedHook{
 				hooks,
 			},
 			BeforeUpstream: []edgekit.BeforeUpstreamHook{
@@ -263,7 +263,7 @@ func failingStages(t *testing.T, stage edgekit.Phase, err error, middleware []ed
 
 func TestClientGoneStatus(t *testing.T) {
 	for _, stage := range []edgekit.Phase{
-		edgekit.PhaseRequestReceived,
+		edgekit.PhaseRouteMatched,
 		edgekit.PhaseUpstreamSelection,
 		edgekit.PhaseBeforeUpstream,
 		edgekit.PhaseRoundTrip,
@@ -314,7 +314,7 @@ func TestCanceledContextDoesNotChangeOtherFailures(t *testing.T) {
 	}{
 		{
 			name:          "hook error while the client is gone",
-			stage:         edgekit.PhaseRequestReceived,
+			stage:         edgekit.PhaseRouteMatched,
 			err:           errors.New("database down"),
 			entryCanceled: true,
 			status:        http.StatusInternalServerError,
@@ -341,14 +341,14 @@ func TestCanceledContextDoesNotChangeOtherFailures(t *testing.T) {
 			status:        http.StatusGatewayTimeout,
 		},
 		{
-			name:               "cancellation by middleware in a hook",
+			name:               "middleware cancellation in a hook",
 			stage:              edgekit.PhaseBeforeUpstream,
 			err:                context.Canceled,
 			middlewareCanceled: true,
 			status:             http.StatusInternalServerError,
 		},
 		{
-			name:               "cancellation by middleware in the round trip",
+			name:               "middleware cancellation in the round trip",
 			stage:              edgekit.PhaseRoundTrip,
 			err:                context.Canceled,
 			middlewareCanceled: true,
@@ -394,11 +394,12 @@ func TestCanceledContextDoesNotChangeOtherFailures(t *testing.T) {
 				t.Errorf("entry context error = %v, want %v", err, wantEntryErr)
 			}
 
-			if !middlewareRan {
-				t.Fatal("middleware did not run")
+			wantMiddleware := tc.stage != edgekit.PhaseRouteMatched
+			if middlewareRan != wantMiddleware {
+				t.Errorf("middleware ran = %v, want %v", middlewareRan, wantMiddleware)
 			}
 
-			if !errors.Is(stageContextErr, context.Canceled) {
+			if wantMiddleware && !errors.Is(stageContextErr, context.Canceled) {
 				t.Errorf("stage context error = %v, want context.Canceled", stageContextErr)
 			}
 
@@ -467,7 +468,7 @@ func TestTypedFailureSentinels(t *testing.T) {
 		},
 		{
 			name:   "no upstream from a request hook",
-			stage:  edgekit.PhaseRequestReceived,
+			stage:  edgekit.PhaseRouteMatched,
 			err:    edgekit.ErrNoUpstreamAvailable,
 			status: http.StatusInternalServerError,
 		},
@@ -760,7 +761,7 @@ func TestResponseHookRequestDoesNotSetFacts(t *testing.T) {
 		},
 		Transport: transport,
 		Hooks: edgekit.Hooks{
-			RequestReceived: []edgekit.RequestReceivedHook{
+			RouteMatched: []edgekit.RouteMatchedHook{
 				hooks,
 			},
 			BeforeUpstream: []edgekit.BeforeUpstreamHook{

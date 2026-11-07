@@ -415,7 +415,7 @@ func TestSigningFailurePreventsForwardingAndCompletesAfterUnwind(t *testing.T) {
 			var completions []edgekit.Completion
 			var unwoundAtCompletion bool
 			g := newGateway(t, edgekit.Config{
-				Middleware: []edgekit.Middleware{
+				SharedMiddleware: []edgekit.Middleware{
 					func(next http.Handler) http.Handler {
 						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 							next.ServeHTTP(w, r)

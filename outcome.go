@@ -109,6 +109,8 @@ func (rc *RequestContext) failureStatus(phase Phase, err error) int {
 		}
 
 		return http.StatusBadGateway
+	case PhaseRequestBuffering:
+		return bufferedFailureStatus(err)
 	case PhaseUpstreamSelection:
 		if errors.Is(err, ErrNoUpstreamAvailable) {
 			return http.StatusServiceUnavailable
@@ -121,7 +123,7 @@ func (rc *RequestContext) failureStatus(phase Phase, err error) int {
 		}
 
 		return http.StatusInternalServerError
-	case PhaseRequestReceived, PhaseBeforeUpstream:
+	case PhaseRouteMatched, PhaseBeforeUpstream:
 		return http.StatusInternalServerError
 	case PhaseUnknown, PhaseProtocolSwitch, PhaseResponseBody:
 		return http.StatusBadGateway

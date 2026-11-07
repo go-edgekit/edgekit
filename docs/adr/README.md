@@ -38,6 +38,9 @@ Acceptance does not freeze precise Go interfaces or mean every preferred extensi
 | [0028](0028-response-body-failures-at-completion.md) | Accepted | Response-body failures | Original read errors after the response hooks reach completion in `PhaseResponseBody`, also after a commit; no change to rendering or abort behavior |
 | [0029](0029-access-log-extension-contract.md) | Accepted (registration superseded in part by 0030) | Access-log extension | A `Sink` interface called synchronously at completion; a recovered sink panic drops the record; a `Record` with safe and sensitive fields and a `LogValue` of the safe fields; a record also without middleware; a generated `X-Request-ID` |
 | [0030](0030-typed-hook-phase-lists.md) | Accepted | Hook registration | Independent typed phase lists in execution order; separate header-owner declarations |
+| [0031](0031-route-first-request-bodies.md) | Accepted | Route-first request bodies | Fixed matching before shared processing; route-aware restricted hooks; bounded memory buffering and request-scoped replay |
+
+[ADR-0031](0031-route-first-request-bodies.md) supersedes the handling-order and body-processing parts of ADR-0003, ADR-0004, ADR-0018, and ADR-0025, and the affected rewrite and observation contracts in ADR-0019, ADR-0027, ADR-0029, and ADR-0030. It fixes route selection before body processing and defines explicit bounded memory buffering.
 
 ## Decision process
 
@@ -53,8 +56,8 @@ Do not silently change the rationale of accepted ADRs. Write a new ADR to supers
 1. Go hook signatures, typed `Config.Hooks` phase lists, `Config.HeaderOwners`, and function adapters (ADR-0003, ADR-0030). Four hook interfaces and their function adapters exist. The API stays provisional until v1.
 2. Typed rejections and typed failures (ADR-0022, ADR-0023, ADR-0025, and ADR-0028). The `(*Rejection, error)` hook results, `Renderer`, `Problem`, the failure sentinels including `ErrInvalidRejection`, `ErrRequestBodyTooLarge`, `ErrInvalidTrailerName`, and `ErrEgressDenied`, and the transport facts in `Completion`. R10 is covered in part: only the egress transport returns a `DialError`.
 3. State-key API (ADR-0005): `NewStateKey`, `SetState`, and `State`. Asynchronous middleware requires revisiting the lifecycle contract.
-4. Route-specific hook registration (ADR-0004, roadmap section 3). Route middleware entering before route-matched hooks, registration-order hook execution, and outer completion are accepted.
-5. Dedicated route-matched hooks (ADR-0003). These remain deferred until a test needs them.
+4. Route-specific hook registration (ADR-0004, roadmap section 3) remains deferred. ADR-0031 supersedes the old ordering: restricted RouteMatched hooks run after protection checks and admission, before buffering and all processing middleware.
+5. Route-aware checks are implemented as RouteMatchedHook (ADR-0031), replacing RequestReceivedHook. They cannot change the request or read its body. A match alone does not establish invocation.
 6. The server API (ADR-0016, ADR-0024): `Server`, `ServerConfig`, `NewServer`, and `NoTimeout`. TLS termination and certificate management are not decided.
 7. The protection API (ADR-0025 and ADR-0026): `BodyLimit`, `MaxBodyBytes`, `NoBodyLimit`, `DefaultBodyLimit`, `AdmissionBudget`, `EgressPolicy`, `EgressTransport`, `Resolver`, `DialError`, `QueryPolicy`, `HeaderNamePolicy`, and `AllowAbsoluteForm`. The default body limit can change in a later release, with a stated reason.
 8. The bundled extensions (ADR-0029): `accesslog.Recorder`, `Config`, `Sink`, `SinkFunc`, `Record`, and `RequestIDHeader`; and the outbound-signing demonstration `outboundsign.Signer`, which is not an authentication protocol. Its route key comes from route middleware, which does not decide between route bindings and route middleware (item 4).

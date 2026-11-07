@@ -13,6 +13,7 @@ Update this document when a change adds a protocol behavior, a new RFC reference
 | [9110](https://www.rfc-editor.org/rfc/rfc9110) | HTTP Semantics | Implemented | Hop-by-hop fields and `Connection` options in headers and declared or late request trailers (7.6.1), upgrades (7.8), trailer fields and the removal of the fields that a trailer must not contain (6.5.1; the list is in the `Gateway` GoDoc), status of failures (15), 1xx responses | `Gateway` GoDoc in [gateway.go](../gateway.go); ADR-0017, ADR-0019, ADR-0023, ADR-0027 |
 | [9112](https://www.rfc-editor.org/rfc/rfc9112) | HTTP/1.1 | Delegated, with checks | Message parsing and framing by `net/http`. The core checks the request target (3.2), also for an unescaped `#` (a fragment) anywhere in the target, which `net/http` accepts; `Host` for the absolute form (3.2.2); and chunked trailers (7.1.2) | `Gateway` GoDoc; ADR-0026, ADR-0027 |
 | [9113](https://www.rfc-editor.org/rfc/rfc9113) | HTTP/2 | Delegated | Protocol by `net/http`. The `Server` sets the stream limit and the flow-control windows (6.5.2, 6.9.2) | `Server` GoDoc in [server.go](../server.go); ADR-0024 |
+| [7541](https://www.rfc-editor.org/rfc/rfc7541) | HPACK | Delegated | HTTP/2 field compression by `net/http`; the retry test fixture uses the static `:status 204` entry (Appendix A) | `request_buffer_retry_test.go`; ADR-0031 |
 | [9111](https://www.rfc-editor.org/rfc/rfc9111) | HTTP Caching | Not implemented | The gateway is not a cache | ADR-0011 |
 | [9114](https://www.rfc-editor.org/rfc/rfc9114) | HTTP/3 | Not supported | The core removes `Alt-Svc`, so clients do not switch to it through the gateway | ADR-0012 (R7) |
 | [6455](https://www.rfc-editor.org/rfc/rfc6455) | The WebSocket Protocol | Implemented | Forwarding of the HTTP/1.1 upgrade (101) and the idle deadlines of upgraded connections | ADR-0019, ADR-0023, ADR-0024 |
@@ -57,6 +58,10 @@ Each deviation is documented where users see it. This list only points to it.
 | 9110 | 5.1 | Header and trailer names with token characters other than letters, digits, and `-` are rejected | Reject | `HeaderNameDrop` | `Gateway` GoDoc; ADR-0012 (R3), ADR-0026 |
 | 3986 | 3.4 | Queries with `;` or other input that `url.ParseQuery` rejects are rejected | Reject | `QueryUnchecked` | `Gateway` GoDoc; ADR-0012 (R2), ADR-0026 |
 | 9110 | 15 | 499 is sent for a client that is gone; it is not a registered status | – | – | `Gateway` GoDoc; ADR-0023 |
+
+## Request-body processing
+
+[ADR-0031](adr/0031-route-first-request-bodies.md) fixes the matched route before body processing. Body limits count bytes exposed by the HTTP body reader, excluding transfer framing (RFC 9112). Streaming is the default; explicit memory buffering does not buffer responses. Excessive content gives 413 (RFC 9110, section 15.5.14), established inbound buffering deadlines give 408 (15.5.9), and storage reservation exhaustion gives 503 (15.6.4). Unknown reader failures, including untyped chunk-decoder or HTTP/2 length-check errors without classified evidence, give 500, not an inferred client-input status. The existing cancellation and commitment rules remain in force. When the gateway forwards unread buffered content of unknown length without trailer fields, it replaces the inbound chunked transfer coding with a Content-Length (RFC 9110, section 8.6). Transfer coding is a property of one connection (RFC 9112, section 6.1), so the content does not change. Trailer fields keep the chunked coding (RFC 9112, section 7.1.2), and an empty body of unknown length is not changed to length zero. No new protocol syntax deviation is introduced.
 
 ## Open items
 

@@ -125,7 +125,7 @@ func TestInformationalResponseKeepsMiddlewareHeaders(t *testing.T) {
 				Upstream: static(t, upstream.URL),
 			},
 		},
-		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
+		SharedMiddleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("X-Middleware", "set")
 				w.Header().Set("Link", middlewareLink)

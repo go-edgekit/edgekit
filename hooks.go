@@ -23,9 +23,9 @@ import (
 // Registration does not declare managed headers; use [Config.HeaderOwners].
 // Hooks are trusted code and must obey the contract of each phase.
 type Hooks struct {
-	// RequestReceived lists the hooks that run after global middleware and
-	// before routing.
-	RequestReceived []RequestReceivedHook
+	// RouteMatched lists the route-aware checks that run after the declared
+	// body-length check and admission, before buffering and middleware.
+	RouteMatched []RouteMatchedHook
 
 	// BeforeUpstream lists the hooks that run after the outbound rewrite and
 	// before the transport.
@@ -40,30 +40,32 @@ type Hooks struct {
 	RequestCompleted []RequestCompletedHook
 }
 
-// RequestReceivedHook is a lifecycle hook that runs after the global
-// middleware and before route matching. Register it in [Hooks.RequestReceived].
+// RouteMatchedHook is a route-aware check before request-body processing.
+// Register it in [Hooks.RouteMatched]. It runs only after successful route
+// matching, the declared body-length check, and gateway and route admission.
+// A match alone does not guarantee invocation. Buffering and all processing
+// middleware run later, so their contexts and state are not available yet.
 //
-// ctx is the context of the request that the global middleware passed on, and
-// r is that request. The hook must not change r or read its body.
+// ctx is the entry execution context and r is the sanitized inbound request.
+// The hook must not change r or read its body. It can set request state and
+// return a rejection or failure under the rules of [Rejection]. The gateway
+// shares hook values between concurrent requests; keep request state in rc.
+// Do not retain r or rc after handling.
 //
-// The result of RequestReceived follows the rules of [Rejection]. After a
-// rejection or an error, the later hooks of the phase do not run, and the
-// gateway does not route the request. For an error, the gateway sends 500
-// Internal Server Error without error details, or 499 when the error wraps
-// [context.Canceled] and the client is gone, and completion gets the error as
-// a [Failure] in [PhaseRequestReceived].
-type RequestReceivedHook interface {
-	RequestReceived(ctx context.Context, rc *RequestContext, r *http.Request) (*Rejection, error)
+// A rejection or error stops later hooks and processing. Completion still
+// runs. An error gives 500 without details, or 499 for an established client
+// cancellation, and a [Failure] in [PhaseRouteMatched].
+type RouteMatchedHook interface {
+	RouteMatched(ctx context.Context, rc *RequestContext, r *http.Request) (*Rejection, error)
 }
 
-// RequestReceivedHookFunc is an adapter to use an ordinary function as a
-// [RequestReceivedHook], as [http.HandlerFunc] is for [http.Handler]. The
-// function must obey the contract of [RequestReceivedHook]. [New] rejects a nil
-// RequestReceivedHookFunc.
-type RequestReceivedHookFunc func(ctx context.Context, rc *RequestContext, r *http.Request) (*Rejection, error)
+// RouteMatchedHookFunc adapts a function to [RouteMatchedHook]. The function
+// must obey that interface's concurrency, ownership, and failure contract.
+// [New] rejects a nil function.
+type RouteMatchedHookFunc func(ctx context.Context, rc *RequestContext, r *http.Request) (*Rejection, error)
 
-// RequestReceived calls f(ctx, rc, r).
-func (f RequestReceivedHookFunc) RequestReceived(ctx context.Context, rc *RequestContext, r *http.Request) (*Rejection, error) {
+// RouteMatched calls f(ctx, rc, r).
+func (f RouteMatchedHookFunc) RouteMatched(ctx context.Context, rc *RequestContext, r *http.Request) (*Rejection, error) {
 	return f(ctx, rc, r)
 }
 
@@ -206,7 +208,7 @@ type HeaderOwner interface {
 
 // compiledHooks holds independent phase lists in execution order (ADR-0030).
 type compiledHooks struct {
-	received  []RequestReceivedHook
+	matched   []RouteMatchedHook
 	before    []BeforeUpstreamHook
 	responses []UpstreamResponseHook
 	completed []RequestCompletedHook
@@ -215,13 +217,13 @@ type compiledHooks struct {
 // compileHooks copies the lists without calling hook methods.
 func compileHooks(h Hooks) (compiledHooks, []error) {
 	var problems []error
-	problems = append(problems, checkHookList(h.RequestReceived, "request received")...)
+	problems = append(problems, checkHookList(h.RouteMatched, "route matched")...)
 	problems = append(problems, checkHookList(h.BeforeUpstream, "before upstream")...)
 	problems = append(problems, checkHookList(h.UpstreamResponse, "upstream response")...)
 	problems = append(problems, checkHookList(h.RequestCompleted, "request completed")...)
 
 	return compiledHooks{
-		received:  slices.Clone(h.RequestReceived),
+		matched:   slices.Clone(h.RouteMatched),
 		before:    slices.Clone(h.BeforeUpstream),
 		responses: slices.Clone(h.UpstreamResponse),
 		completed: slices.Clone(h.RequestCompleted),
