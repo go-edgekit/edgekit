@@ -180,7 +180,12 @@ func TestSignsRewrittenDestinationAndEscapedURI(t *testing.T) {
 			signer := outboundsign.New()
 			g := newGateway(t, edgekit.Config{
 				Transport: transport,
-				Hooks: []any{
+				Hooks: edgekit.Hooks{
+					BeforeUpstream: []edgekit.BeforeUpstreamHook{
+						signer,
+					},
+				},
+				HeaderOwners: []edgekit.HeaderOwner{
 					signer,
 				},
 				Routes: []edgekit.Route{
@@ -288,7 +293,12 @@ func TestSigningDoesNotChangeInboundRequest(t *testing.T) {
 
 	signer := outboundsign.New()
 	g := newGateway(t, edgekit.Config{
-		Hooks: []any{
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				signer,
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
 			signer,
 		},
 		Routes: []edgekit.Route{
@@ -413,11 +423,18 @@ func TestSigningFailurePreventsForwardingAndCompletesAfterUnwind(t *testing.T) {
 						})
 					},
 				},
-				Hooks: []any{
-					edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
-						unwoundAtCompletion = unwound
-						completions = append(completions, c)
-					}),
+				Hooks: edgekit.Hooks{
+					BeforeUpstream: []edgekit.BeforeUpstreamHook{
+						signer,
+					},
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
+							unwoundAtCompletion = unwound
+							completions = append(completions, c)
+						}),
+					},
+				},
+				HeaderOwners: []edgekit.HeaderOwner{
 					signer,
 				},
 				Routes: []edgekit.Route{
@@ -476,10 +493,17 @@ func TestNewlineInMethodFailsClosed(t *testing.T) {
 	completions := make(chan edgekit.Completion, 1)
 	signer := outboundsign.New()
 	g := newGateway(t, edgekit.Config{
-		Hooks: []any{
-			edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
-				completions <- c
-			}),
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				signer,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
+					completions <- c
+				}),
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
 			signer,
 		},
 		Routes: []edgekit.Route{
@@ -563,7 +587,12 @@ func TestConcurrentRoutesUseTheirOwnSigningKeys(t *testing.T) {
 	}
 
 	g := newGateway(t, edgekit.Config{
-		Hooks: []any{
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				signer,
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
 			signer,
 		},
 		Routes: routes,

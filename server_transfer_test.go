@@ -328,7 +328,11 @@ func TestStalledStreamDoesNotStopOtherStreams(t *testing.T) {
 				Upstream: static(t, quiet.URL),
 			},
 		},
-		Hooks: []any{completionHook},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				completionHook,
+			},
+		},
 	})
 	ts := startServer(t, g, edgekit.ServerConfig{
 		TransferIdleTimeout: testIdle,

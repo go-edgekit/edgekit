@@ -13,20 +13,30 @@
 //
 // # Registration
 //
-// Register the [Signer] as the last hook provider, so it signs after the
-// providers that change the request (ADR-0021), and register the middleware
-// of [Signer.WithKey] on each route that it signs:
+// Register the [Signer] last in [edgekit.Hooks.BeforeUpstream] so it signs
+// the header changes of earlier hooks. Register it separately as a header
+// owner, and register the middleware of [Signer.WithKey] on each route that
+// it signs:
 //
 //	signer := outboundsign.New()
 //	withKey, err := signer.WithKey(key)
 //	// ...
 //	gateway, err := edgekit.New(edgekit.Config{
-//		Hooks: []any{recorder, signer},
-//		Routes: []edgekit.Route{{
-//			Prefix:     "/api/",
-//			Upstream:   selector,
-//			Middleware: []edgekit.Middleware{withKey},
-//		}},
+//		Hooks: edgekit.Hooks{
+//			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+//				signer,
+//			},
+//		},
+//		HeaderOwners: []edgekit.HeaderOwner{
+//			signer,
+//		},
+//		Routes: []edgekit.Route{
+//			{
+//				Prefix:     "/api/",
+//				Upstream:   selector,
+//				Middleware: []edgekit.Middleware{withKey},
+//			},
+//		},
 //	})
 //
 // A request on a route without the middleware fails closed: the hook
@@ -95,7 +105,8 @@ var ErrNoKey = errors.New("outboundsign: route has no signing key")
 var ErrInvalidField = errors.New("outboundsign: signed field contains a newline")
 
 // Signer signs outbound requests with the key of their route. Make it with
-// [New]. It is a hook provider: register it in [edgekit.Config.Hooks].
+// [New]. Register it in [edgekit.Hooks.BeforeUpstream] and
+// [edgekit.Config.HeaderOwners].
 //
 // A Signer is safe for concurrent use. The keys are copies that it does not
 // change, and the key of each request is in the request state of that
@@ -103,6 +114,13 @@ var ErrInvalidField = errors.New("outboundsign: signed field contains a newline"
 type Signer struct {
 	key *edgekit.StateKey[[]byte]
 }
+
+// The package documentation promises these interfaces to users who register
+// a Signer.
+var (
+	_ edgekit.BeforeUpstreamHook = (*Signer)(nil)
+	_ edgekit.HeaderOwner        = (*Signer)(nil)
+)
 
 // New returns a Signer.
 func New() *Signer {

@@ -79,10 +79,12 @@ func TestStreamFailureDiagnosticOmitsDetails(t *testing.T) {
 	var unwound bool
 	completionHooks, completed := completions()
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, "http://upstream.test/base"),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, "http://upstream.test/base"),
+			},
+		},
 		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -92,7 +94,11 @@ func TestStreamFailureDiagnosticOmitsDetails(t *testing.T) {
 			}, nil
 		}),
 		Middleware: []edgekit.Middleware{unwinding(&unwound)},
-		Hooks:      []any{completionHooks},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				completionHooks,
+			},
+		},
 		Renderer: func(context.Context, edgekit.Problem) (string, []byte) {
 			rendered = true
 
@@ -173,14 +179,20 @@ func TestRoundTripErrorStaysAvailableWithoutLogging(t *testing.T) {
 	output := captureDiagnostics(t)
 	completionHooks, completed := completions()
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, "http://upstream.test"),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, "http://upstream.test"),
+			},
+		},
 		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 			return nil, errSecret
 		}),
-		Hooks: []any{completionHooks},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				completionHooks,
+			},
+		},
 	})
 
 	w := httptest.NewRecorder()

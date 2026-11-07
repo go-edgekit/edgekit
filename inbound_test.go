@@ -28,10 +28,12 @@ func TestSecureDefaultsRejectBeforeMiddleware(t *testing.T) {
 
 	var entered atomic.Int32
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				entered.Add(1)
@@ -423,10 +425,12 @@ func TestRequestFromOutsideServerNeedsOriginForm(t *testing.T) {
 	defer upstream.Close()
 
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 	})
 
 	// Requests that an embedder makes have no RequestURI.
@@ -506,10 +510,12 @@ func TestForwardingTrustAndHopByHopHeaders(t *testing.T) {
 
 			var middlewareSaw http.Header
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, upstream.URL),
-				}},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, upstream.URL),
+					},
+				},
 				ManagedHeaders: []string{"x-user"},
 				Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -657,10 +663,12 @@ func TestConnectionCannotRemoveManagedHeader(t *testing.T) {
 	defer upstream.Close()
 
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		ManagedHeaders: []string{"X-User"},
 		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -716,10 +724,12 @@ func TestRequestTrailersCannotCarryRemovedHeaders(t *testing.T) {
 	defer upstream.Close()
 
 	server := httptest.NewServer(newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		ManagedHeaders: []string{"X-User"},
 	}))
 	defer server.Close()
@@ -791,10 +801,12 @@ func TestGatewayDoesNotChangeInboundRequest(t *testing.T) {
 	defer upstream.Close()
 
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		ManagedHeaders: []string{"X-User"},
 		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -878,10 +890,12 @@ func TestQueryIsForwardedUnchanged(t *testing.T) {
 	defer upstream.Close()
 
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 	})
 
 	for _, query := range []string{
@@ -919,10 +933,12 @@ func TestMiddlewareQueryIsForwardedUnchanged(t *testing.T) {
 	// secure defaults reject the same query from a client.
 	const query = "a=1;b=2&c=%zz"
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				r = r.Clone(r.Context())
@@ -944,7 +960,7 @@ func TestMiddlewareQueryIsForwardedUnchanged(t *testing.T) {
 	}
 }
 
-// headerOwner is a hook provider that only declares managed headers.
+// headerOwner declares managed headers without lifecycle hooks.
 type headerOwner []string
 
 // ManagedHeaders returns the names.
@@ -968,11 +984,15 @@ func TestDeclaredManagedHeadersAreRemoved(t *testing.T) {
 	defer upstream.Close()
 
 	server := httptest.NewServer(newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
-		Hooks: []any{headerOwner{"x-customer"}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
+			headerOwner{"x-customer"},
+		},
 		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				r = r.Clone(r.Context())

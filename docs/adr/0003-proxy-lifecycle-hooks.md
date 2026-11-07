@@ -55,3 +55,5 @@ Signing needs no route-matched hook. Add `RouteMatched` only when a requirement 
 **Note 2026-11-04:** Upstream selection is an extension point (`UpstreamSelector`, [ADR-0008](0008-separate-routing-from-upstream-selection.md)). [ADR-0013](0013-typed-rejections-and-replaceable-renderer.md) defines the typed rejection and the replaceable renderer.
 
 **Superseded in part 2026-11-04:** [ADR-0021](0021-hook-order-by-provider-position.md) replaces registration order in each phase. The first hook provider is the outermost one, as for middleware: the request phases run from the first provider to the last, and `UpstreamResponse` and completion hooks run from the last provider to the first.
+
+**Registration and order 2026-11-07:** [ADR-0030](0030-typed-hook-phase-lists.md) supersedes ADR-0021. Hooks are registered in independent typed phase lists, each in execution order. Header-owner declarations are separate.

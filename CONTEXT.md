@@ -50,8 +50,12 @@ A lifecycle hook that takes part in handling before completion: when the request
 _Avoid_: Filter
 
 **Hook provider**:
-A value that an extension registers with the gateway to supply its lifecycle hooks or to declare its managed headers. It is a part of an extension, not the extension itself.
+A value that implements one or more lifecycle hook interfaces. It runs only in the phase lists that contain it. It is a part of an extension, not the extension itself.
 _Avoid_: Extension (for the registered value), plugin
+
+**Header owner**:
+A value that declares managed headers of an extension. Header ownership is independent of lifecycle hooks: a hook provider declares no headers unless it is also registered as a header owner.
+_Avoid_: Extension (for the registered value)
 
 **Transport**:
 An extension point that carries the outbound request to the selected upstream.

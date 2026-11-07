@@ -19,14 +19,12 @@ func invalid(format string, args ...any) error {
 }
 
 // checkConfig validates cfg and compiles hook lists without calling middleware.
-func checkConfig(cfg Config) (hooks, map[string]struct{}, []error) {
-	compiled, declared, problems := compileHooks(cfg.Hooks)
+func checkConfig(cfg Config) (compiledHooks, map[string]struct{}, []error) {
+	compiled, problems := compileHooks(cfg.Hooks)
 
 	managedHeaders := make(map[string]struct{}, len(cfg.ManagedHeaders))
 	problems = append(problems, addManagedHeaders(managedHeaders, cfg.ManagedHeaders, "managed header")...)
-	for i, names := range declared {
-		problems = append(problems, addManagedHeaders(managedHeaders, names, fmt.Sprintf("hooks %d: managed header", i))...)
-	}
+	problems = append(problems, addHeaderOwners(managedHeaders, cfg.HeaderOwners)...)
 
 	if err := checkTransport(cfg.Transport); err != nil {
 		problems = append(problems, invalid("transport: %w", err))
@@ -40,6 +38,24 @@ func checkConfig(cfg Config) (hooks, map[string]struct{}, []error) {
 	}
 
 	return compiled, managedHeaders, problems
+}
+
+// addHeaderOwners calls ManagedHeaders once for each owner that is not nil.
+// It is the only step of the validation that calls extension code.
+func addHeaderOwners(set map[string]struct{}, owners []HeaderOwner) []error {
+	var problems []error
+	for i, owner := range owners {
+		if isNilValue(owner) {
+			problems = append(problems, invalid("header owners %d: is nil", i))
+
+			continue
+		}
+
+		location := fmt.Sprintf("header owners %d: managed header", i)
+		problems = append(problems, addManagedHeaders(set, owner.ManagedHeaders(), location)...)
+	}
+
+	return problems
 }
 
 // addManagedHeaders permits overlap between lists, but not duplicates within a

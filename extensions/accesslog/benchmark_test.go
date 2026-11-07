@@ -64,7 +64,18 @@ func benchmarkServeHTTP(b *testing.B, recorder *accesslog.Recorder) {
 		cfg.Middleware = []edgekit.Middleware{
 			recorder.Middleware,
 		}
-		cfg.Hooks = []any{
+		cfg.Hooks = edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				recorder,
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				recorder,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				recorder,
+			},
+		}
+		cfg.HeaderOwners = []edgekit.HeaderOwner{
 			recorder,
 		}
 	}

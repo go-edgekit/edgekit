@@ -131,11 +131,13 @@ func TestProxyForwardsRequestAndAppliesRouteMiddleware(t *testing.T) {
 		})
 	}
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:     "/api/",
-			Upstream:   static(t, upstream.URL),
-			Middleware: []edgekit.Middleware{routeMiddleware},
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:     "/api/",
+				Upstream:   static(t, upstream.URL),
+				Middleware: []edgekit.Middleware{routeMiddleware},
+			},
+		},
 	})
 
 	r := httptest.NewRequest(http.MethodPost, "/api/hello?q=1", strings.NewReader("payload"))
@@ -191,15 +193,17 @@ func TestGlobalAndRouteMiddlewareOrder(t *testing.T) {
 
 	selector := static(t, upstream.URL)
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix: "/api/",
-			Upstream: edgekit.UpstreamSelectorFunc(func(r *http.Request) (*url.URL, error) {
-				record("select")
+		Routes: []edgekit.Route{
+			{
+				Prefix: "/api/",
+				Upstream: edgekit.UpstreamSelectorFunc(func(r *http.Request) (*url.URL, error) {
+					record("select")
 
-				return selector.SelectUpstream(r)
-			}),
-			Middleware: []edgekit.Middleware{wrap("route1"), wrap("route2")},
-		}},
+					return selector.SelectUpstream(r)
+				}),
+				Middleware: []edgekit.Middleware{wrap("route1"), wrap("route2")},
+			},
+		},
 		Middleware: []edgekit.Middleware{wrap("global1"), wrap("global2")},
 	})
 
@@ -229,10 +233,12 @@ func TestGlobalAndRouteMiddlewareOrder(t *testing.T) {
 func TestGlobalMiddlewareRunsForRouteMiss(t *testing.T) {
 	ran := false
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, "http://upstream.invalid"),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, "http://upstream.invalid"),
+			},
+		},
 		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				ran = true
@@ -433,11 +439,13 @@ func TestCustomUpstreamSelector(t *testing.T) {
 		})
 	}
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:     "/api/",
-			Upstream:   selector,
-			Middleware: []edgekit.Middleware{pool},
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:     "/api/",
+				Upstream:   selector,
+				Middleware: []edgekit.Middleware{pool},
+			},
+		},
 	})
 
 	for _, tc := range []struct {
@@ -794,11 +802,13 @@ func TestMiddlewareIsCalledOnceForValidConfiguration(t *testing.T) {
 	}
 
 	newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:     "/api/",
-			Upstream:   static(t, "http://upstream.test"),
-			Middleware: []edgekit.Middleware{counted},
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:     "/api/",
+				Upstream:   static(t, "http://upstream.test"),
+				Middleware: []edgekit.Middleware{counted},
+			},
+		},
 		Middleware: []edgekit.Middleware{counted},
 	})
 
@@ -818,10 +828,12 @@ func TestMiddlewareIsNotCalledForStructuralProblem(t *testing.T) {
 	// A missing upstream selector is a structural problem, so New must find
 	// it before it calls a middleware function.
 	_, err := edgekit.New(edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:     "/api/",
-			Middleware: []edgekit.Middleware{counted},
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:     "/api/",
+				Middleware: []edgekit.Middleware{counted},
+			},
+		},
 		Middleware: []edgekit.Middleware{counted},
 	})
 
@@ -882,10 +894,12 @@ func TestConfigurationIsCopied(t *testing.T) {
 	}
 
 	cfg := edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: selector,
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: selector,
+			},
+		},
 		ManagedHeaders: []string{"X-User"},
 	}
 	g := newGateway(t, cfg)
@@ -929,10 +943,12 @@ func TestGatewayConstructionDoesNotReconfigureProcessLogging(t *testing.T) {
 	writer := log.Writer()
 
 	newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, "http://upstream.test"),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, "http://upstream.test"),
+			},
+		},
 	})
 
 	if slog.Default() != logger || log.Writer() != writer {
@@ -944,83 +960,87 @@ func TestGatewayConstructionDoesNotReconfigureProcessLogging(t *testing.T) {
 	}
 }
 
-func TestInvalidHookProviders(t *testing.T) {
-	var typedNil *testHooks
+func TestInvalidHeaderOwners(t *testing.T) {
+	var typedNil *headerOwner
 
 	for _, tc := range []struct {
 		name     string
-		provider any
+		owner    edgekit.HeaderOwner
 		location string
 	}{
 		{
 			name:     "nil",
-			provider: nil,
-			location: "hooks 0: is nil",
+			owner:    nil,
+			location: "header owners 0: is nil",
 		},
 		{
 			name:     "typed nil",
-			provider: typedNil,
-			location: "hooks 0: is nil",
+			owner:    typedNil,
+			location: "header owners 0: is nil",
 		},
 		{
-			name:     "nil hook function",
-			provider: edgekit.BeforeUpstreamHookFunc(nil),
-			location: "hooks 0: is nil",
-		},
-		{
-			name:     "no hook interface",
-			provider: struct{}{},
-			location: "hooks 0: implements no hook interface",
+			name:     "nil slice",
+			owner:    headerOwner(nil),
+			location: "header owners 0: is nil",
 		},
 		{
 			name:     "managed header alias",
-			provider: headerOwner{"X_Customer"},
-			location: "hooks 0: managed header 0:",
+			owner:    headerOwner{"X_Customer"},
+			location: "header owners 0: managed header 0:",
 		},
 		{
 			name:     "managed hop-by-hop header",
-			provider: headerOwner{"Connection"},
-			location: "hooks 0: managed header 0:",
+			owner:    headerOwner{"Connection"},
+			location: "header owners 0: managed header 0:",
 		},
 		{
 			name:     "duplicate in one declaration",
-			provider: headerOwner{"X-Customer", "x-customer"},
-			location: "hooks 0: managed header 1: is a duplicate",
+			owner:    headerOwner{"X-Customer", "x-customer"},
+			location: "header owners 0: managed header 1: is a duplicate",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := edgekit.New(edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, "http://upstream.test"),
-				}},
-				Hooks: []any{tc.provider},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, "http://upstream.test"),
+					},
+				},
+				HeaderOwners: []edgekit.HeaderOwner{
+					tc.owner,
+				},
 			})
 
-			if !errors.Is(err, edgekit.ErrInvalidConfiguration) || !strings.Contains(err.Error(), tc.location) {
-				t.Errorf("New error = %v, want %v with %q", err, edgekit.ErrInvalidConfiguration, tc.location)
+			if !errors.Is(err, edgekit.ErrInvalidConfiguration) {
+				t.Fatalf("New error = %v, want %v", err, edgekit.ErrInvalidConfiguration)
 			}
 
-			if err != nil && strings.Contains(strings.ToLower(err.Error()), "customer") {
+			if !strings.Contains(err.Error(), tc.location) {
+				t.Errorf("New error = %v, want location %q", err, tc.location)
+			}
+
+			if strings.Contains(strings.ToLower(err.Error()), "customer") {
 				t.Errorf("New error %q contains the header name", err)
 			}
 		})
 	}
 }
 
-func TestHookProvidersAccepted(t *testing.T) {
-	// A provider can only declare headers, and declarations can overlap with
-	// each other and with Config.ManagedHeaders.
+func TestHeaderOwnersAccepted(t *testing.T) {
+	// Declarations do not need lifecycle hooks and can overlap with each
+	// other and with Config.ManagedHeaders.
 	_, err := edgekit.New(edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, "http://upstream.test"),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, "http://upstream.test"),
+			},
+		},
 		ManagedHeaders: []string{"X-Customer"},
-		Hooks: []any{
+		HeaderOwners: []edgekit.HeaderOwner{
 			headerOwner{"X-Customer"},
 			headerOwner{"x-customer", "X-Key-Id"},
-			&testHooks{},
 		},
 	})
 	if err != nil {

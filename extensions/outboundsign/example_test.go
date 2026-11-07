@@ -50,19 +50,26 @@ func ExampleNew() {
 		return
 	}
 
-	// The signer is the last hook provider, so it signs after all other
-	// changes. The route middleware gives it the key of the route.
+	// The signer is last in BeforeUpstream so it signs all header changes.
+	// The route middleware gives it the key of the route.
 	gateway, err := edgekit.New(edgekit.Config{
-		Hooks: []any{
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				signer,
+			},
+		},
+		HeaderOwners: []edgekit.HeaderOwner{
 			signer,
 		},
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: selector,
-			Middleware: []edgekit.Middleware{
-				withKey,
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: selector,
+				Middleware: []edgekit.Middleware{
+					withKey,
+				},
 			},
-		}},
+		},
 	})
 	if err != nil {
 		fmt.Println(err)

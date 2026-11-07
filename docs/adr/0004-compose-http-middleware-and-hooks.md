@@ -68,3 +68,5 @@ When route-matched hooks are added, test that route middleware establishes state
 **Amended 2026-11-03:** [ADR-0018](0018-completion-observes-gateway-rejections.md) places the secure-default request checks inside the completion observer and before the removal of managed headers. Completion observes their rejections without running middleware or processing hooks.
 
 **Superseded in part 2026-11-04:** [ADR-0021](0021-hook-order-by-provider-position.md) replaces registration order in each phase. The first hook provider is the outermost one, as for middleware: the request phases run from the first provider to the last, and `UpstreamResponse` and completion hooks run from the last provider to the first.
+
+**Registration and order 2026-11-07:** [ADR-0030](0030-typed-hook-phase-lists.md) supersedes ADR-0021. Each typed phase list runs in execution order. Middleware still nests, and handling stages keep their fixed order.

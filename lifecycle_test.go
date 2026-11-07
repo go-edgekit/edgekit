@@ -138,7 +138,7 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 			}
 
 			if resp.Header.Get("X-Upstream") != "modified" {
-				t.Error("UpstreamResponse hooks ran in list order, want reverse order")
+				t.Error("UpstreamResponse hooks did not run in configured order")
 			}
 
 			steps = append(steps, "response:first")
@@ -235,13 +235,32 @@ func TestLifecycleContextAndOrder(t *testing.T) {
 		})
 	}
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:     "/api/",
-			Upstream:   static(t, upstream.URL),
-			Middleware: []edgekit.Middleware{routeMiddleware},
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:     "/api/",
+				Upstream:   static(t, upstream.URL),
+				Middleware: []edgekit.Middleware{routeMiddleware},
+			},
+		},
 		Middleware: []edgekit.Middleware{global},
-		Hooks:      []any{first, second},
+		Hooks: edgekit.Hooks{
+			RequestReceived: []edgekit.RequestReceivedHook{
+				first,
+				second,
+			},
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				first,
+				second,
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				second,
+				first,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				second,
+				first,
+			},
+		},
 	})
 
 	w := httptest.NewRecorder()
@@ -397,13 +416,15 @@ func TestCompletionOnEarlyExits(t *testing.T) {
 				})
 			}
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:     "/api/",
-					Upstream:   static(t, upstream.URL),
-					Middleware: routeMiddleware,
-				}},
+				Routes: []edgekit.Route{
+					{
+						Prefix:     "/api/",
+						Upstream:   static(t, upstream.URL),
+						Middleware: routeMiddleware,
+					},
+				},
 				Middleware: []edgekit.Middleware{global},
-				Hooks:      []any{hooks},
+				Hooks:      allPhases(hooks),
 			})
 
 			before := requests.Load()
@@ -477,17 +498,34 @@ func TestSecureDefaultRejectionReachesCompletion(t *testing.T) {
 		states = append(states, stored)
 	})
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				entered.Add(1)
 				next.ServeHTTP(w, r)
 			})
 		}},
-		Hooks: []any{processingHooks, hooks, inspect},
+		Hooks: edgekit.Hooks{
+			RequestReceived: []edgekit.RequestReceivedHook{
+				processingHooks,
+			},
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				processingHooks,
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				processingHooks,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				inspect,
+				hooks,
+				processingHooks,
+			},
+		},
 	})
 
 	for _, tc := range []struct {
@@ -604,23 +642,21 @@ func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
 			var requests atomic.Int32
 			upstream := countingUpstream(t, &requests)
 
-			var (
-				laterRan []string
-				first    any
-			)
+			var laterRan []string
+			first := &testHooks{}
 			switch tc.phase {
 			case edgekit.PhaseRequestReceived:
-				first = edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+				first.received = func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 					return nil, fmt.Errorf("lookup: %w", secret)
-				})
+				}
 			case edgekit.PhaseBeforeUpstream:
-				first = edgekit.BeforeUpstreamHookFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+				first.before = func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 					return nil, fmt.Errorf("sign: %w", secret)
-				})
+				}
 			default:
-				first = edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+				first.response = func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 					return nil, fmt.Errorf("inspect: %w", secret)
-				})
+				}
 			}
 			second := &testHooks{}
 			second.received = func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
@@ -640,20 +676,32 @@ func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
 			}
 			hooks, completed := completions()
 
-			// The failing hook must run before the hooks of the second
-			// provider. The response phase runs from the last provider to the
-			// first.
-			providers := []any{first, second, hooks}
-			if tc.phase == edgekit.PhaseUpstreamResponse {
-				providers = []any{second, first, hooks}
+			phaseHooks := edgekit.Hooks{
+				RequestReceived: []edgekit.RequestReceivedHook{
+					first,
+					second,
+				},
+				BeforeUpstream: []edgekit.BeforeUpstreamHook{
+					first,
+					second,
+				},
+				UpstreamResponse: []edgekit.UpstreamResponseHook{
+					first,
+					second,
+				},
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					hooks,
+				},
 			}
 
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, upstream.URL),
-				}},
-				Hooks: providers,
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, upstream.URL),
+					},
+				},
+				Hooks: phaseHooks,
 			})
 
 			w := httptest.NewRecorder()
@@ -689,11 +737,17 @@ func TestTransportErrorReachesCompletion(t *testing.T) {
 
 	hooks, completed := completions()
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
-		Hooks: []any{hooks},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				hooks,
+			},
+		},
 	})
 
 	w := httptest.NewRecorder()
@@ -733,12 +787,18 @@ func TestCompletionDuringPanicUnwinding(t *testing.T) {
 				})
 			}
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, "http://unused.test"),
-				}},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, "http://unused.test"),
+					},
+				},
 				Middleware: []edgekit.Middleware{unwinding(&unwound), panicking},
-				Hooks:      []any{hooks},
+				Hooks: edgekit.Hooks{
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						hooks,
+					},
+				},
 			})
 
 			recovered := func() (recovered any) {
@@ -775,11 +835,17 @@ func TestStreamingFailureAbortsAndCompletes(t *testing.T) {
 
 	hooks, completed := completions()
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
-		Hooks: []any{hooks},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				hooks,
+			},
+		},
 	})
 
 	// ReverseProxy aborts with http.ErrAbortHandler for a failed body copy
@@ -865,12 +931,21 @@ func TestExtensionSharesStateBetweenMiddlewareAndHooks(t *testing.T) {
 		records: make(chan tagRecord, 1),
 	}
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		Middleware: []edgekit.Middleware{tag.Middleware},
-		Hooks:      []any{tag},
+		Hooks: edgekit.Hooks{
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				tag,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				tag,
+			},
+		},
 	})
 
 	for _, tc := range []struct {
@@ -943,10 +1018,12 @@ func TestTypedStateIsolationAndNilValues(t *testing.T) {
 	observed := make(chan observation, 2)
 	leaked := make(chan bool, 2)
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, "http://unused.test"),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, "http://unused.test"),
+			},
+		},
 		Middleware: []edgekit.Middleware{func(http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				rc, _ := edgekit.FromContext(r.Context())
@@ -1030,11 +1107,13 @@ func TestStateIsDroppedAfterCompletion(t *testing.T) {
 		},
 	}
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, "http://unused.test"),
-		}},
-		Hooks: []any{hooks},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, "http://unused.test"),
+			},
+		},
+		Hooks: allPhases(hooks),
 	})
 
 	g.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/missing", nil))
@@ -1064,11 +1143,13 @@ func TestStateIsDroppedWhenACompletionHookPanics(t *testing.T) {
 		},
 	}
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, "http://unused.test"),
-		}},
-		Hooks: []any{hooks},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, "http://unused.test"),
+			},
+		},
+		Hooks: allPhases(hooks),
 	})
 
 	panicked := panics(func() {
@@ -1106,11 +1187,13 @@ func TestConcurrentRequestStateIsolation(t *testing.T) {
 		},
 	}
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, "http://unused.test"),
-		}},
-		Hooks: []any{hooks},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, "http://unused.test"),
+			},
+		},
+		Hooks: allPhases(hooks),
 	})
 
 	var wg sync.WaitGroup
@@ -1151,11 +1234,13 @@ func TestCancellationReachesHooks(t *testing.T) {
 		},
 	}
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, "http://unused.test"),
-		}},
-		Hooks: []any{hooks},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, "http://unused.test"),
+			},
+		},
+		Hooks: allPhases(hooks),
 	})
 
 	w := httptest.NewRecorder()
@@ -1189,12 +1274,28 @@ func TestCompletionOnOutboundPanic(t *testing.T) {
 	}
 	completionHooks, completed := completions()
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:     "/api/",
-			Upstream:   static(t, "http://unused.test"),
-			Middleware: []edgekit.Middleware{unwinding(&unwound)},
-		}},
-		Hooks: []any{hooks, completionHooks},
+		Routes: []edgekit.Route{
+			{
+				Prefix:     "/api/",
+				Upstream:   static(t, "http://unused.test"),
+				Middleware: []edgekit.Middleware{unwinding(&unwound)},
+			},
+		},
+		Hooks: edgekit.Hooks{
+			RequestReceived: []edgekit.RequestReceivedHook{
+				hooks,
+			},
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				hooks,
+			},
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				hooks,
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				completionHooks,
+				hooks,
+			},
+		},
 		Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
 			roundTrips.Add(1)
 
@@ -1260,13 +1361,19 @@ func TestMissingGatewayContextFailsClosed(t *testing.T) {
 			upstream := countingUpstream(t, &requests)
 			hooks, completed := completions()
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:     "/api/",
-					Upstream:   static(t, upstream.URL),
-					Middleware: tc.route,
-				}},
+				Routes: []edgekit.Route{
+					{
+						Prefix:     "/api/",
+						Upstream:   static(t, upstream.URL),
+						Middleware: tc.route,
+					},
+				},
 				Middleware: tc.global,
-				Hooks:      []any{hooks},
+				Hooks: edgekit.Hooks{
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						hooks,
+					},
+				},
 			})
 
 			w := httptest.NewRecorder()
@@ -1331,10 +1438,12 @@ func TestClientCancellationReachesUpstreamAndCompletion(t *testing.T) {
 				}
 			})
 			server := httptest.NewServer(newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, upstream.URL),
-				}},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, upstream.URL),
+					},
+				},
 				Transport: testTransport(t),
 				Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1343,7 +1452,11 @@ func TestClientCancellationReachesUpstreamAndCompletion(t *testing.T) {
 						next.ServeHTTP(w, r)
 					})
 				}},
-				Hooks: []any{hooks},
+				Hooks: edgekit.Hooks{
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						hooks,
+					},
+				},
 			}))
 			defer server.Close()
 
@@ -1425,13 +1538,19 @@ func TestResponseHeaderTimeoutReachesCompletion(t *testing.T) {
 		completion = c
 	})
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		Transport:  transport,
 		Middleware: []edgekit.Middleware{unwinding(&unwound)},
-		Hooks:      []any{hooks},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				hooks,
+			},
+		},
 	})
 
 	w := httptest.NewRecorder()

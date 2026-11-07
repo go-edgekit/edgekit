@@ -245,15 +245,17 @@ func TestHeaderNameDropRemovesInvalidNames(t *testing.T) {
 				})
 			},
 		},
-		Hooks: []any{
-			edgekit.RequestReceivedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
-				atHook = observation{
-					headers:  invalidNames(r.Header),
-					trailers: invalidNames(r.Trailer),
-				}
+		Hooks: edgekit.Hooks{
+			RequestReceived: []edgekit.RequestReceivedHook{
+				edgekit.RequestReceivedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
+					atHook = observation{
+						headers:  invalidNames(r.Header),
+						trailers: invalidNames(r.Trailer),
+					}
 
-				return nil, nil
-			}),
+					return nil, nil
+				}),
+			},
 		},
 	})
 
@@ -322,7 +324,11 @@ func TestHeaderNameDropKeepsOutboundCheck(t *testing.T) {
 				})
 			},
 		},
-		Hooks: []any{collector},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				collector,
+			},
+		},
 	})
 
 	w := httptest.NewRecorder()
@@ -465,15 +471,19 @@ func newAbsoluteFormServer(t *testing.T) *absoluteFormServer {
 				})
 			},
 		},
-		Hooks: []any{
-			collector,
-			edgekit.RequestReceivedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
-				observation.hookURL = r.URL.String()
-				observation.hookHost = r.Host
-				observed <- observation
+		Hooks: edgekit.Hooks{
+			RequestReceived: []edgekit.RequestReceivedHook{
+				edgekit.RequestReceivedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
+					observation.hookURL = r.URL.String()
+					observation.hookHost = r.Host
+					observed <- observation
 
-				return nil, nil
-			}),
+					return nil, nil
+				}),
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				collector,
+			},
 		},
 	})
 

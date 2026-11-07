@@ -27,10 +27,12 @@ func gatewayServer(t *testing.T, upstreamURL string) *httptest.Server {
 	t.Helper()
 
 	server := httptest.NewServer(newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstreamURL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstreamURL),
+			},
+		},
 	}))
 	t.Cleanup(server.Close)
 
@@ -117,10 +119,12 @@ func TestInformationalResponseKeepsMiddlewareHeaders(t *testing.T) {
 
 	middlewareLink := "</middleware.css>; rel=preload"
 	server := httptest.NewServer(newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
 		Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("X-Middleware", "set")
@@ -348,16 +352,18 @@ func responseHead(t *testing.T, server *httptest.Server, request string) (string
 }
 
 // hookServer returns a started server for a gateway with one route to
-// upstreamURL and the given hook providers.
-func hookServer(t *testing.T, upstreamURL string, providers ...any) *httptest.Server {
+// upstreamURL and the given phase lists.
+func hookServer(t *testing.T, upstreamURL string, phaseHooks edgekit.Hooks) *httptest.Server {
 	t.Helper()
 
 	server := httptest.NewServer(newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstreamURL),
-		}},
-		Hooks: providers,
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstreamURL),
+			},
+		},
+		Hooks: phaseHooks,
 	}))
 	t.Cleanup(server.Close)
 
@@ -397,7 +403,11 @@ func TestResponseHeaderRulesAfterHooks(t *testing.T) {
 
 		return nil, nil
 	})
-	server := hookServer(t, upstream.URL, hooks)
+	server := hookServer(t, upstream.URL, edgekit.Hooks{
+		UpstreamResponse: []edgekit.UpstreamResponseHook{
+			hooks,
+		},
+	})
 
 	status, header, _, _ := responseHead(t, server, "GET /api/x HTTP/1.1\r\nHost: gateway.test\r\nConnection: close\r\n\r\n")
 
@@ -542,11 +552,17 @@ func TestResponseContentLengthAfterHooks(t *testing.T) {
 			})
 			var serverLog bytes.Buffer
 			server := httptest.NewUnstartedServer(newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, upstream.URL),
-				}},
-				Hooks: []any{hooks},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, upstream.URL),
+					},
+				},
+				Hooks: edgekit.Hooks{
+					UpstreamResponse: []edgekit.UpstreamResponseHook{
+						hooks,
+					},
+				},
 			}))
 			server.Config.ErrorLog = log.New(&serverLog, "", 0)
 			server.Start()
@@ -643,7 +659,11 @@ func TestUpgradeResponseHeaderRulesAfterHooks(t *testing.T) {
 
 		return nil, nil
 	})
-	server := hookServer(t, upstream.URL, hooks)
+	server := hookServer(t, upstream.URL, edgekit.Hooks{
+		UpstreamResponse: []edgekit.UpstreamResponseHook{
+			hooks,
+		},
+	})
 
 	status, header, reader, conn := responseHead(t, server, upgradeRequest)
 
@@ -731,7 +751,14 @@ func TestUpgradeProtocolIsRestoredAfterHooks(t *testing.T) {
 				return nil, nil
 			})
 			completionHooks, completed := completions()
-			server := hookServer(t, upstream.URL, hooks, completionHooks)
+			server := hookServer(t, upstream.URL, edgekit.Hooks{
+				UpstreamResponse: []edgekit.UpstreamResponseHook{
+					hooks,
+				},
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					completionHooks,
+				},
+			})
 
 			// The header map has no fixed iteration order, so more than one
 			// request makes an order-dependent result visible.
@@ -770,7 +797,11 @@ func TestUpgradeProtocolIsRestoredAfterHooks(t *testing.T) {
 func TestUpgradeMismatchFromUpstream(t *testing.T) {
 	upstream := upgradeUpstream(t, "Connection: Upgrade\r\nUpgrade: other\r\n")
 	completionHooks, completed := completions()
-	server := hookServer(t, upstream.URL, completionHooks)
+	server := hookServer(t, upstream.URL, edgekit.Hooks{
+		RequestCompleted: []edgekit.RequestCompletedHook{
+			completionHooks,
+		},
+	})
 
 	status, _, _, _ := responseHead(t, server, upgradeRequest)
 
@@ -800,7 +831,11 @@ func TestResponseHooksSkipInformationalResponses(t *testing.T) {
 
 		return nil, nil
 	})
-	server := hookServer(t, upstream.URL, hooks)
+	server := hookServer(t, upstream.URL, edgekit.Hooks{
+		UpstreamResponse: []edgekit.UpstreamResponseHook{
+			hooks,
+		},
+	})
 
 	var informational atomic.Int32
 	trace := &httptrace.ClientTrace{
@@ -844,11 +879,17 @@ func TestConnectionTokensDoNotDependOnMapOrder(t *testing.T) {
 		return nil, nil
 	})
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, upstream.URL),
-		}},
-		Hooks: []any{hooks},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, upstream.URL),
+			},
+		},
+		Hooks: edgekit.Hooks{
+			UpstreamResponse: []edgekit.UpstreamResponseHook{
+				hooks,
+			},
+		},
 	})
 
 	// Go randomizes the iteration order of maps, so many requests examine
@@ -877,7 +918,11 @@ func TestUpgradeConnectionTokensDoNotDependOnMapOrder(t *testing.T) {
 
 		return nil, nil
 	})
-	server := hookServer(t, upstream.URL, hooks)
+	server := hookServer(t, upstream.URL, edgekit.Hooks{
+		UpstreamResponse: []edgekit.UpstreamResponseHook{
+			hooks,
+		},
+	})
 
 	for i := range 20 {
 		status, header, _, _ := responseHead(t, server, upgradeRequest)
@@ -934,16 +979,22 @@ func TestResponseHooksGetTheGatewayContext(t *testing.T) {
 				return nil, nil
 			})
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, "http://upstream.test"),
-					Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
-						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-							next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), derivedKey{}, "derived")))
-						})
-					}},
-				}},
-				Hooks:     []any{hooks},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, "http://upstream.test"),
+						Middleware: []edgekit.Middleware{func(next http.Handler) http.Handler {
+							return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+								next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), derivedKey{}, "derived")))
+							})
+						}},
+					},
+				},
+				Hooks: edgekit.Hooks{
+					UpstreamResponse: []edgekit.UpstreamResponseHook{
+						hooks,
+					},
+				},
 				Transport: transport,
 			})
 
@@ -1066,11 +1117,20 @@ func TestResponseHookCannotCrossTheUpgradeBoundary(t *testing.T) {
 			})
 			completionHooks, completed := completions()
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, "http://upstream.test"),
-				}},
-				Hooks:     []any{hooks, completionHooks},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, "http://upstream.test"),
+					},
+				},
+				Hooks: edgekit.Hooks{
+					UpstreamResponse: []edgekit.UpstreamResponseHook{
+						hooks,
+					},
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						completionHooks,
+					},
+				},
 				Transport: transport,
 			})
 

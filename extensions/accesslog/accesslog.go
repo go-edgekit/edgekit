@@ -10,24 +10,57 @@
 //
 // # Registration
 //
-// Register the same [Recorder] as the first global middleware and as the
-// first hook provider:
+// Register the same [Recorder] as global middleware, in each phase that it
+// implements, and as a header owner:
 //
 //	recorder, err := accesslog.New(accesslog.Config{Sink: sink})
 //	// ...
 //	gateway, err := edgekit.New(edgekit.Config{
 //		Middleware: []edgekit.Middleware{tracing, recorder.Middleware},
-//		Hooks:      []any{recorder, signer},
-//		Routes:     routes,
+//		Hooks: edgekit.Hooks{
+//			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+//				recorder,
+//				signer,
+//			},
+//			UpstreamResponse: []edgekit.UpstreamResponseHook{
+//				recorder,
+//			},
+//			RequestCompleted: []edgekit.RequestCompletedHook{
+//				recorder,
+//			},
+//		},
+//		HeaderOwners: []edgekit.HeaderOwner{
+//			recorder,
+//			signer,
+//		},
+//		Routes: routes,
 //	})
 //
 // The middleware must be outside each middleware whose responses it must
 // observe, such as recovery or authorization middleware. Middleware that
 // gives the trace context, such as tracing middleware, must be outside the
-// recorder, so [Config.TraceID] can read it. As the first hook provider, the
-// recorder sets the request ID before the other BeforeUpstream hooks, sees
-// the upstream response after the other UpstreamResponse hooks, and reports
-// after the other completion hooks (ADR-0021).
+// recorder, so [Config.TraceID] can read it. In BeforeUpstream, register the
+// recorder before hooks that read, change, or sign [RequestIDHeader] in the
+// outbound request. Other hooks can get the ID with [Recorder.RequestID] at
+// any position. Register the recorder last in UpstreamResponse and
+// RequestCompleted so it observes earlier hooks (ADR-0030). Each phase list
+// runs in its written order.
+//
+// The gateway does not tell the recorder where it is registered, so the
+// recorder cannot detect a missing registration. Each missing registration
+// has a different effect:
+//
+//   - Without RequestCompleted, the [Sink] gets no records.
+//   - Without the middleware, records have Observed false, and the recorder
+//     sends no request ID.
+//   - Without BeforeUpstream, the upstream gets no request ID.
+//   - Without UpstreamResponse, UpstreamStatus is always 0, and the recorder
+//     does not remove the [RequestIDHeader] values of the upstream from the
+//     response headers and the declared trailers before the middleware sees
+//     them.
+//   - Without the header-owner registration, the gateway does not remove the
+//     [RequestIDHeader] values of the client, so middleware and hooks that
+//     run before the recorder can see them.
 //
 // # Records
 //
@@ -135,6 +168,15 @@ type Recorder struct {
 	traceID func(ctx context.Context) string
 	key     *edgekit.StateKey[*Record]
 }
+
+// The package documentation promises these interfaces to users who register
+// a Recorder.
+var (
+	_ edgekit.BeforeUpstreamHook   = (*Recorder)(nil)
+	_ edgekit.UpstreamResponseHook = (*Recorder)(nil)
+	_ edgekit.RequestCompletedHook = (*Recorder)(nil)
+	_ edgekit.HeaderOwner          = (*Recorder)(nil)
+)
 
 // New returns a Recorder for cfg. It returns [ErrNoSink] when cfg.Sink is
 // nil, also when the interface holds a typed nil value. It copies cfg, so later

@@ -102,12 +102,18 @@ func TestBeforeUpstreamHookChangesReachTransport(t *testing.T) {
 		})
 	}
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:     "/api/",
-			Upstream:   static(t, "http://upstream.test/base"),
-			Middleware: []edgekit.Middleware{routeMiddleware},
-		}},
-		Hooks:     []any{hooks},
+		Routes: []edgekit.Route{
+			{
+				Prefix:     "/api/",
+				Upstream:   static(t, "http://upstream.test/base"),
+				Middleware: []edgekit.Middleware{routeMiddleware},
+			},
+		},
+		Hooks: edgekit.Hooks{
+			BeforeUpstream: []edgekit.BeforeUpstreamHook{
+				hooks,
+			},
+		},
 		Transport: transport,
 	})
 
@@ -190,20 +196,26 @@ func TestConfiguredTransportWithAndWithoutOutboundHooks(t *testing.T) {
 				}, nil
 			})
 			completionHooks, completed := completions()
-			providers := []any{completionHooks}
+			phaseHooks := edgekit.Hooks{
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					completionHooks,
+				},
+			}
 			if tc.withHooks {
-				providers = append(providers, edgekit.BeforeUpstreamHookFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+				phaseHooks.BeforeUpstream = append(phaseHooks.BeforeUpstream, edgekit.BeforeUpstreamHookFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 					out.Header().Set("X-Hook", "ran")
 
 					return nil, nil
 				}))
 			}
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, "http://upstream.test"),
-				}},
-				Hooks:     providers,
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, "http://upstream.test"),
+					},
+				},
+				Hooks:     phaseHooks,
 				Transport: transport,
 			})
 
@@ -285,13 +297,19 @@ func TestBeforeUpstreamHeaderRules(t *testing.T) {
 				return nil, nil
 			})
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, "http://upstream.test"),
-				}},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, "http://upstream.test"),
+					},
+				},
 				ManagedHeaders: []string{"X-User"},
-				Hooks:          []any{hooks},
-				Transport:      transport,
+				Hooks: edgekit.Hooks{
+					BeforeUpstream: []edgekit.BeforeUpstreamHook{
+						hooks,
+					},
+				},
+				Transport: transport,
 			})
 
 			r := httptest.NewRequest(http.MethodGet, "/api/x", nil)
@@ -429,12 +447,21 @@ func TestBeforeUpstreamInvalidHeaderFails(t *testing.T) {
 				completion = c
 			})
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:     "/api/",
-					Upstream:   static(t, "http://upstream.test"),
-					Middleware: []edgekit.Middleware{unwinding(&unwound)},
-				}},
-				Hooks:     []any{hooks, completionHooks},
+				Routes: []edgekit.Route{
+					{
+						Prefix:     "/api/",
+						Upstream:   static(t, "http://upstream.test"),
+						Middleware: []edgekit.Middleware{unwinding(&unwound)},
+					},
+				},
+				Hooks: edgekit.Hooks{
+					BeforeUpstream: []edgekit.BeforeUpstreamHook{
+						hooks,
+					},
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						completionHooks,
+					},
+				},
 				Transport: transport,
 			})
 
@@ -518,11 +545,17 @@ func TestOutboundHostIsTheValueThatTheUpstreamGets(t *testing.T) {
 					return nil, nil
 				})
 				g := newGateway(t, edgekit.Config{
-					Routes: []edgekit.Route{{
-						Prefix:   "/api/",
-						Upstream: static(t, "http://"+host),
-					}},
-					Hooks:     []any{hooks},
+					Routes: []edgekit.Route{
+						{
+							Prefix:   "/api/",
+							Upstream: static(t, "http://"+host),
+						},
+					},
+					Hooks: edgekit.Hooks{
+						BeforeUpstream: []edgekit.BeforeUpstreamHook{
+							hooks,
+						},
+					},
 					Transport: transport,
 				})
 
@@ -562,13 +595,19 @@ func TestSelectedHostThatTheTransportChangesIsRejected(t *testing.T) {
 			})
 			hooks, completed := completions()
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix: "/api/",
-					Upstream: edgekit.UpstreamSelectorFunc(func(*http.Request) (*url.URL, error) {
-						return &url.URL{Scheme: "http", Host: host}, nil
-					}),
-				}},
-				Hooks:     []any{hooks},
+				Routes: []edgekit.Route{
+					{
+						Prefix: "/api/",
+						Upstream: edgekit.UpstreamSelectorFunc(func(*http.Request) (*url.URL, error) {
+							return &url.URL{Scheme: "http", Host: host}, nil
+						}),
+					},
+				},
+				Hooks: edgekit.Hooks{
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						hooks,
+					},
+				},
 				Transport: transport,
 			})
 
@@ -598,11 +637,13 @@ func TestKeptOutboundRequestPanicsAfterTheHooks(t *testing.T) {
 	}
 	transport, _ := recordingTransport(t)
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, "http://upstream.test"),
-		}},
-		Hooks:     []any{hooks},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, "http://upstream.test"),
+			},
+		},
+		Hooks:     allPhases(hooks),
 		Transport: transport,
 	})
 

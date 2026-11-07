@@ -280,7 +280,7 @@ func (ts *testServer) shutdown(t *testing.T) error {
 }
 
 // apiGateway returns a gateway with one route "/api/" to upstreamURL.
-func apiGateway(t *testing.T, upstreamURL string, middleware []edgekit.Middleware, hooks ...any) *edgekit.Gateway {
+func apiGateway(t *testing.T, upstreamURL string, middleware []edgekit.Middleware, hooks ...edgekit.RequestCompletedHook) *edgekit.Gateway {
 	t.Helper()
 
 	return newGateway(t, edgekit.Config{
@@ -291,7 +291,9 @@ func apiGateway(t *testing.T, upstreamURL string, middleware []edgekit.Middlewar
 			},
 		},
 		Middleware: middleware,
-		Hooks:      hooks,
+		Hooks: edgekit.Hooks{
+			RequestCompleted: hooks,
+		},
 	})
 }
 

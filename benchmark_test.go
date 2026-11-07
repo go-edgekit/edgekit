@@ -23,14 +23,14 @@ func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 // BenchmarkServeHTTP measures the gateway without network I/O, so the
 // gateway's own work is visible.
 func BenchmarkServeHTTP(b *testing.B) {
-	benchmarkServeHTTP(b, nil)
+	benchmarkServeHTTP(b, edgekit.Hooks{})
 }
 
 // BenchmarkServeHTTPHooks is BenchmarkServeHTTP with one hook provider for
 // all four phases, so the difference is the cost of hook dispatch and of the
 // header rules after the hooks.
 func BenchmarkServeHTTPHooks(b *testing.B) {
-	benchmarkServeHTTP(b, []any{&testHooks{
+	hook := &testHooks{
 		received: func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 			return nil, nil
 		},
@@ -41,11 +41,12 @@ func BenchmarkServeHTTPHooks(b *testing.B) {
 			return nil, nil
 		},
 		completed: func(context.Context, *edgekit.RequestContext, edgekit.Completion) {},
-	}})
+	}
+	benchmarkServeHTTP(b, allPhases(hook))
 }
 
-// benchmarkServeHTTP runs the sub-benchmarks for a gateway with providers.
-func benchmarkServeHTTP(b *testing.B, providers []any) {
+// benchmarkServeHTTP runs the sub-benchmarks for a gateway with hooks.
+func benchmarkServeHTTP(b *testing.B, hooks edgekit.Hooks) {
 	b.Helper()
 
 	transport := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
@@ -57,11 +58,13 @@ func benchmarkServeHTTP(b *testing.B, providers []any) {
 		}, nil
 	})
 	g, err := edgekit.New(edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(b, "http://upstream.test"),
-		}},
-		Hooks:     providers,
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(b, "http://upstream.test"),
+			},
+		},
+		Hooks:     hooks,
 		Transport: transport,
 	})
 	if err != nil {

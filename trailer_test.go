@@ -169,7 +169,11 @@ func newTrailerForwarding(t *testing.T, setup trailerSetup) *trailerForwarding {
 		ManagedHeaders:   []string{"X-Customer"},
 		HeaderNamePolicy: edgekit.HeaderNameDrop,
 		Middleware:       middleware,
-		Hooks:            []any{collector},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				collector,
+			},
+		},
 	})
 
 	return &trailerForwarding{
@@ -397,7 +401,11 @@ func sendLateInvalidTrailer(t *testing.T, middleware edgekit.Middleware) lateTra
 			},
 		},
 		Transport: transport,
-		Hooks:     []any{collector},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				collector,
+			},
+		},
 	}
 	if middleware != nil {
 		cfg.Middleware = []edgekit.Middleware{middleware}
@@ -898,7 +906,11 @@ func TestTrailerStatusNeedsEvidence(t *testing.T) {
 				Transport: readingTransport{
 					fail: tc.fail,
 				},
-				Hooks: []any{collector},
+				Hooks: edgekit.Hooks{
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						collector,
+					},
+				},
 			})
 
 			ctx, cancel := context.WithCancel(t.Context())
@@ -1032,7 +1044,11 @@ func TestEarlyResponseWithLateTrailers(t *testing.T) {
 						})
 					},
 				},
-				Hooks: []any{collector},
+				Hooks: edgekit.Hooks{
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						collector,
+					},
+				},
 			})
 			ts := startServer(t, g, edgekit.ServerConfig{}, serverOptions{})
 

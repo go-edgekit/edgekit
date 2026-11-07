@@ -276,19 +276,23 @@ func TestSaturationRejectsWithoutQueueOrBodyRead(t *testing.T) {
 				})
 			},
 		},
-		Hooks: []any{
-			edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
-				received.Add(1)
+		Hooks: edgekit.Hooks{
+			RequestReceived: []edgekit.RequestReceivedHook{
+				edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+					received.Add(1)
 
-				return nil, nil
-			}),
-			edgekit.RequestCompletedHookFunc(func(_ context.Context, rc *edgekit.RequestContext, c edgekit.Completion) {
-				unwound, _ := edgekit.State(rc, unwoundKey)
-				completed <- observed{
-					completion: c,
-					unwound:    unwound,
-				}
-			}),
+					return nil, nil
+				}),
+			},
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				edgekit.RequestCompletedHookFunc(func(_ context.Context, rc *edgekit.RequestContext, c edgekit.Completion) {
+					unwound, _ := edgekit.State(rc, unwoundKey)
+					completed <- observed{
+						completion: c,
+						unwound:    unwound,
+					}
+				}),
+			},
 		},
 	})
 
@@ -361,14 +365,16 @@ func TestAdmissionPassesRequestAndWriter(t *testing.T) {
 				})
 			},
 		},
-		Hooks: []any{
-			edgekit.RequestReceivedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
-				if r != outerRequest {
-					t.Error("RequestReceived hook got another request, want the original one")
-				}
+		Hooks: edgekit.Hooks{
+			RequestReceived: []edgekit.RequestReceivedHook{
+				edgekit.RequestReceivedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
+					if r != outerRequest {
+						t.Error("RequestReceived hook got another request, want the original one")
+					}
 
-				return nil, nil
-			}),
+					return nil, nil
+				}),
+			},
 		},
 	})
 
@@ -413,7 +419,11 @@ func TestPanicReleasesAdmissionSlot(t *testing.T) {
 
 			collector, completed := completions()
 			cfg.Routes = []edgekit.Route{route}
-			cfg.Hooks = []any{collector}
+			cfg.Hooks = edgekit.Hooks{
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					collector,
+				},
+			}
 			g := newGateway(t, cfg)
 
 			var recovered any
@@ -666,7 +676,11 @@ func TestCancellationDuringPoolWaitReleasesSlot(t *testing.T) {
 		},
 		Transport: transport,
 		Admission: budget(t, 2),
-		Hooks:     []any{collector},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				collector,
+			},
+		},
 	})
 
 	first := serveAsync(g, httptest.NewRequest(http.MethodGet, "/api/active", nil))
@@ -851,7 +865,11 @@ func TestUpgradedConnectionHoldsAdmissionSlot(t *testing.T) {
 						},
 					},
 				},
-				Hooks: []any{collector},
+				Hooks: edgekit.Hooks{
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						collector,
+					},
+				},
 			}
 			if tc.gateway {
 				cfg.Admission = budget(t, 1)

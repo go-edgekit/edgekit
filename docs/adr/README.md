@@ -10,8 +10,8 @@ Acceptance does not freeze precise Go interfaces or mean every preferred extensi
 | --- | --- | --- | --- |
 | [0001](0001-framework-scope.md) | Superseded by 0011 | Framework scope | Minimal, embeddable proxy core; business features live in extensions |
 | [0002](0002-use-go-standard-http-proxy.md) | Accepted | HTTP foundation | `net/http` and `httputil.ReverseProxy` rather than a custom networking stack |
-| [0003](0003-proxy-lifecycle-hooks.md) | Accepted (amended by 0019, superseded in part by 0021) | Lifecycle hooks | Small optional interfaces compiled into ordered hook lists at startup |
-| [0004](0004-compose-http-middleware-and-hooks.md) | Accepted (amended by 0018, superseded in part by 0021) | Middleware coexistence | Route middleware enters before route-matched hooks; completion surrounds the managed chain |
+| [0003](0003-proxy-lifecycle-hooks.md) | Accepted (amended by 0019, superseded in part by 0021 and 0030) | Lifecycle hooks | Small optional interfaces compiled into ordered hook lists at startup |
+| [0004](0004-compose-http-middleware-and-hooks.md) | Accepted (amended by 0018, superseded in part by 0021 and 0030) | Middleware coexistence | Route middleware enters before route-matched hooks; completion surrounds the managed chain |
 | [0005](0005-per-request-gateway-context.md) | Accepted | Request context | Typed extension state, serial per-request access, and explicit context lifetimes |
 | [0006](0006-compile-time-go-extensions.md) | Accepted | Extension distribution | Compile-time Go packages before dynamic plugin systems |
 | [0007](0007-immutable-runtime-pipelines.md) | Accepted | Configuration lifecycle | Validate and compile immutable request pipelines at startup; policy data changes at runtime |
@@ -28,7 +28,7 @@ Acceptance does not freeze precise Go interfaces or mean every preferred extensi
 | [0018](0018-completion-observes-gateway-rejections.md) | Accepted (amended by 0022, 0023, 0025) | Completion boundary | Completion observes gateway-owned rejections with a public reason code and no request content |
 | [0019](0019-hook-outputs-and-destination-ownership.md) | Accepted (amended by 0027) | Hook outputs | Hooks cannot change the destination; the core sanitizes header maps after hooks |
 | [0020](0020-route-prefix-matching-without-redirects.md) | Accepted | Route matching | Escaped, case-sensitive, longest prefix match; no trailing-slash redirects |
-| [0021](0021-hook-order-by-provider-position.md) | Accepted | Hook order | The first hook provider is the outermost one; response phases run in reverse order |
+| [0021](0021-hook-order-by-provider-position.md) | Superseded by 0030 | Hook order | The first hook provider is the outermost one; response phases run in reverse order |
 | [0022](0022-rejections-and-the-problem-response.md) | Accepted | Rejections and renderer | Processing hooks return `(*Rejection, error)` with `<extension>.<check>` codes, and an error always wins; a body-only renderer with a minimal `problem+json` default |
 | [0023](0023-failure-evidence-and-transport-facts.md) | Accepted (amended by 0025, 0027, refined by 0028) | Failure evidence | 499 and 504 from typed errors and the client context; transport trace facts; protocol-switch failures; no response on a connection that another component hijacked |
 | [0024](0024-hardened-server-deadlines-and-upgraded-connections.md) | Accepted | Hardened server | `NoTimeout` is the only way to disable a timeout; a handler's deadline call takes over its direction; writes have a deadline for each 16 KiB; the server closes the gateway's upgraded connections at shutdown |
@@ -36,7 +36,8 @@ Acceptance does not freeze precise Go interfaces or mean every preferred extensi
 | [0026](0026-relax-request-secure-defaults.md) | Accepted (amended 2026-11-06) | Relaxations | Gateway-wide `QueryUnchecked`, `HeaderNameDrop`, and `AllowAbsoluteForm`; the other request checks cannot be relaxed |
 | [0027](0027-request-trailers-at-the-end-of-the-body.md) | Accepted (refined by 0028) | Request trailers | Own trailer map; check all trailers at a successful end of the body; publish to middleware and the outbound request; 400 from the late-name evidence |
 | [0028](0028-response-body-failures-at-completion.md) | Accepted | Response-body failures | Original read errors after the response hooks reach completion in `PhaseResponseBody`, also after a commit; no change to rendering or abort behavior |
-| [0029](0029-access-log-extension-contract.md) | Accepted | Access-log extension | A `Sink` interface called synchronously at completion; a recovered sink panic drops the record; a `Record` with safe and sensitive fields and a `LogValue` of the safe fields; a record also without middleware; a generated `X-Request-ID` |
+| [0029](0029-access-log-extension-contract.md) | Accepted (registration superseded in part by 0030) | Access-log extension | A `Sink` interface called synchronously at completion; a recovered sink panic drops the record; a `Record` with safe and sensitive fields and a `LogValue` of the safe fields; a record also without middleware; a generated `X-Request-ID` |
+| [0030](0030-typed-hook-phase-lists.md) | Accepted | Hook registration | Independent typed phase lists in execution order; separate header-owner declarations |
 
 ## Decision process
 
@@ -49,7 +50,7 @@ Do not silently change the rationale of accepted ADRs. Write a new ADR to supers
 
 ## Remaining provisional APIs and deferred work
 
-1. Go hook signatures, the `Config.Hooks` registration, and function adapters (ADR-0003). Four hook interfaces exist, without function adapters. The API stays provisional until v1.
+1. Go hook signatures, typed `Config.Hooks` phase lists, `Config.HeaderOwners`, and function adapters (ADR-0003, ADR-0030). Four hook interfaces and their function adapters exist. The API stays provisional until v1.
 2. Typed rejections and typed failures (ADR-0022, ADR-0023, ADR-0025, and ADR-0028). The `(*Rejection, error)` hook results, `Renderer`, `Problem`, the failure sentinels including `ErrInvalidRejection`, `ErrRequestBodyTooLarge`, `ErrInvalidTrailerName`, and `ErrEgressDenied`, and the transport facts in `Completion`. R10 is covered in part: only the egress transport returns a `DialError`.
 3. State-key API (ADR-0005): `NewStateKey`, `SetState`, and `State`. Asynchronous middleware requires revisiting the lifecycle contract.
 4. Route-specific hook registration (ADR-0004, roadmap section 3). Route middleware entering before route-matched hooks, registration-order hook execution, and outer completion are accepted.

@@ -70,12 +70,18 @@ func TestDefaultProblemResponse(t *testing.T) {
 				})
 			}
 			server := httptest.NewServer(newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, "http://unused.test"),
-				}},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, "http://unused.test"),
+					},
+				},
 				Middleware: []edgekit.Middleware{middleware},
-				Hooks:      []any{hooks},
+				Hooks: edgekit.Hooks{
+					RequestReceived: []edgekit.RequestReceivedHook{
+						hooks,
+					},
+				},
 			}))
 			defer server.Close()
 
@@ -156,10 +162,12 @@ func TestProblemResponseOwnsContentTypeOptions(t *testing.T) {
 						})
 					}
 					g := newGateway(t, edgekit.Config{
-						Routes: []edgekit.Route{{
-							Prefix:   "/api/",
-							Upstream: static(t, "http://unused.test"),
-						}},
+						Routes: []edgekit.Route{
+							{
+								Prefix:   "/api/",
+								Upstream: static(t, "http://unused.test"),
+							},
+						},
 						Middleware: []edgekit.Middleware{middleware},
 						Renderer:   tc.renderer,
 					})
@@ -413,18 +421,22 @@ func TestCustomRendererForEverySource(t *testing.T) {
 				return "text/plain; charset=utf-8", []byte("custom")
 			}
 			completionHooks, completed := completions()
-			providers := []any{completionHooks}
+			phaseHooks := edgekit.Hooks{
+				RequestCompleted: []edgekit.RequestCompletedHook{
+					completionHooks,
+				},
+			}
 			switch tc.hookPhase {
 			case edgekit.PhaseRequestReceived:
-				providers = append(providers, edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+				phaseHooks.RequestReceived = append(phaseHooks.RequestReceived, edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 					return tc.rejection, tc.hookErr
 				}))
 			case edgekit.PhaseBeforeUpstream:
-				providers = append(providers, edgekit.BeforeUpstreamHookFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+				phaseHooks.BeforeUpstream = append(phaseHooks.BeforeUpstream, edgekit.BeforeUpstreamHookFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 					return tc.rejection, tc.hookErr
 				}))
 			case edgekit.PhaseUpstreamResponse:
-				providers = append(providers, edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+				phaseHooks.UpstreamResponse = append(phaseHooks.UpstreamResponse, edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 					return tc.rejection, tc.hookErr
 				}))
 			default:
@@ -489,12 +501,14 @@ func TestCustomRendererForEverySource(t *testing.T) {
 				})
 			}
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: selector,
-				}},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: selector,
+					},
+				},
 				Middleware: []edgekit.Middleware{lose},
-				Hooks:      providers,
+				Hooks:      phaseHooks,
 				Transport:  transport,
 				Renderer:   renderer,
 			})
@@ -575,10 +589,12 @@ func TestInvalidRendererContentTypeFallsBack(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := newGateway(t, edgekit.Config{
-				Routes: []edgekit.Route{{
-					Prefix:   "/api/",
-					Upstream: static(t, "http://unused.test"),
-				}},
+				Routes: []edgekit.Route{
+					{
+						Prefix:   "/api/",
+						Upstream: static(t, "http://unused.test"),
+					},
+				},
 				Renderer: func(context.Context, edgekit.Problem) (string, []byte) {
 					return tc.contentType, []byte("custom")
 				},
@@ -609,11 +625,17 @@ func TestInvalidRendererContentTypeFallsBack(t *testing.T) {
 func TestRendererPanicContinuesAfterCompletion(t *testing.T) {
 	completionHooks, completed := completions()
 	g := newGateway(t, edgekit.Config{
-		Routes: []edgekit.Route{{
-			Prefix:   "/api/",
-			Upstream: static(t, "http://unused.test"),
-		}},
-		Hooks: []any{completionHooks},
+		Routes: []edgekit.Route{
+			{
+				Prefix:   "/api/",
+				Upstream: static(t, "http://unused.test"),
+			},
+		},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				completionHooks,
+			},
+		},
 		Renderer: func(context.Context, edgekit.Problem) (string, []byte) {
 			panic("renderer defect")
 		},

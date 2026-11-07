@@ -96,12 +96,14 @@ func sendWithBodyLimits(t *testing.T, gatewayLimit, routeLimit edgekit.BodyLimit
 		},
 		BodyLimit:  gatewayLimit,
 		Middleware: []edgekit.Middleware{unwinding(&unwound)},
-		Hooks: []any{
-			edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
-				got.completions++
-				got.completion = c
-				got.unwoundFirst = unwound
-			}),
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
+					got.completions++
+					got.completion = c
+					got.unwoundFirst = unwound
+				}),
+			},
 		},
 	})
 
@@ -506,7 +508,11 @@ func sendAfterPreRead(t *testing.T, gatewayLimit, routeLimit int64, preRead int)
 				})
 			},
 		},
-		Hooks: []any{collector},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				collector,
+			},
+		},
 	})
 
 	g.ServeHTTP(got.recorder, bodyRequest("abcdef", false))
@@ -622,7 +628,11 @@ func TestDeclaredBodyRejectedBeforeContinue(t *testing.T) {
 				},
 			},
 		},
-		Hooks: []any{collector},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				collector,
+			},
+		},
 	})
 	ts := startServer(t, g, edgekit.ServerConfig{}, serverOptions{})
 	conn := ts.dial(t)
@@ -732,7 +742,7 @@ func TestBodyOverflowStatusNeedsEvidence(t *testing.T) {
 				fail: tc.fail,
 			}
 
-			var hooks []any
+			var hooks []edgekit.UpstreamResponseHook
 			if tc.response != nil {
 				transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 					_ = r.Body.Close()
@@ -758,7 +768,12 @@ func TestBodyOverflowStatusNeedsEvidence(t *testing.T) {
 				},
 				Transport: transport,
 				BodyLimit: edgekit.MaxBodyBytes(4),
-				Hooks:     append(hooks, collector),
+				Hooks: edgekit.Hooks{
+					UpstreamResponse: hooks,
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						collector,
+					},
+				},
 			})
 
 			ctx, cancel := context.WithCancel(t.Context())
@@ -832,7 +847,11 @@ func echoGateway(t *testing.T, limit edgekit.BodyLimit) (*edgekit.Gateway, *atom
 
 			return "text/plain", nil
 		},
-		Hooks: []any{collector},
+		Hooks: edgekit.Hooks{
+			RequestCompleted: []edgekit.RequestCompletedHook{
+				collector,
+			},
+		},
 	})
 
 	return g, rendered, completed
@@ -917,7 +936,11 @@ func TestBodyLimitThroughServer(t *testing.T) {
 						BodyLimit: edgekit.MaxBodyBytes(4),
 					},
 				},
-				Hooks: []any{collector},
+				Hooks: edgekit.Hooks{
+					RequestCompleted: []edgekit.RequestCompletedHook{
+						collector,
+					},
+				},
 			})
 			ts := startServer(t, g, edgekit.ServerConfig{}, serverOptions{
 				tls: true,
