@@ -28,9 +28,14 @@ Slices:
    - The body limit is a secure default of 10 MiB with a limit for each route. Admission budgets and the egress transport are configurable protections. `DialError` gives the attempts of a failed dial of the egress transport; `NewTransport` does not return it yet.
    - Request trailers are checked at the end of the body and forwarded to middleware and the upstream ([ADR-0027](adr/0027-request-trailers-at-the-end-of-the-body.md)).
    - Relaxations: `QueryUnchecked`, `HeaderNameDrop`, and `AllowAbsoluteForm`. `CONNECT`, the other target forms, the `Upgrade` check, and the outbound header check cannot be relaxed. The configuration of the path policy comes with normalize mode in slice 1b.
-6. Bundled extensions: access log and outbound signing. Slice 1 removed the `headers` and `requesttag` demonstrations.
+6. Bundled extensions: access log and outbound signing ([ADR-0029](adr/0029-access-log-extension-contract.md)). Slice 1 removed the `headers` and `requesttag` demonstrations. Done.
+   - Both extensions use only the standard library, so they stay in the core module (ADR-0014). A lint rule forbids internal imports in `extensions/` and `examples/`.
+   - The access log covers the sink part of section 4: a `Sink` interface that is called synchronously at completion. Exporters, bounded asynchronous sinks, sampling, and metrics stay in section 4.
+   - Outbound signing is a demonstration, not a supported security extension: it has no timestamp, replay protection, body integrity, or key identifier. Its key comes from route middleware through request state, as in the prototype. This does not decide the open experiment of section 3.
+   - A signing failure is 500 (a hook failure, ADR-0017), or 499 when the client is gone (ADR-0023), not the 502 of the prototype.
+   - The rewrite is not finished: slice 1b and the typed dial failure of `NewTransport` are open, so the ledger and its rule stay.
 
-The rewrite is done when every ledger row is covered or dropped, the ledger and its AGENTS.md rule are deleted, no document calls the code a prototype, and `just check` passes. The Go API stays provisional until v1.
+The rewrite is done when every slice of this roadmap is done, every ledger row is covered or dropped, the ledger and its AGENTS.md rule are deleted, no document calls the code a prototype, and `just check` passes. The Go API stays provisional until v1.
 
 Scope of the rewrite:
 
@@ -57,7 +62,7 @@ Proves the motivating limitations can be solved without core changes ([ADR-0015]
 ## 4. Remaining hardening and analytics
 
 - R6 trusted-proxy mode, R11 idle-connection retirement.
-- Analytics: the access-log extension with a sink interface; exporters as separate modules.
+- Analytics: the access-log extension with a sink interface is done (slice 6). Exporters as separate modules, bounded asynchronous sinks, and metrics stay open. Accepting a request ID from a trusted proxy needs R6.
 
 ## Deferred
 

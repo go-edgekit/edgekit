@@ -97,7 +97,7 @@ func sendWithBodyLimits(t *testing.T, gatewayLimit, routeLimit edgekit.BodyLimit
 		BodyLimit:  gatewayLimit,
 		Middleware: []edgekit.Middleware{unwinding(&unwound)},
 		Hooks: []any{
-			requestCompletedFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
+			edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
 				got.completions++
 				got.completion = c
 				got.unwoundFirst = unwound
@@ -743,7 +743,7 @@ func TestBodyOverflowStatusNeedsEvidence(t *testing.T) {
 						Body:       http.NoBody,
 					}, nil
 				})
-				hooks = append(hooks, upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+				hooks = append(hooks, edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 					return nil, tc.response(nil)
 				}))
 			}

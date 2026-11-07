@@ -623,7 +623,7 @@ func TestUpstreamHeaderLimitBeforeResponseHooks(t *testing.T) {
 			defer upstream.Close()
 
 			var responses int
-			hooks := upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+			hooks := edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 				responses++
 
 				return nil, nil

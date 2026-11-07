@@ -277,12 +277,12 @@ func TestSaturationRejectsWithoutQueueOrBodyRead(t *testing.T) {
 			},
 		},
 		Hooks: []any{
-			requestReceivedFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 				received.Add(1)
 
 				return nil, nil
 			}),
-			requestCompletedFunc(func(_ context.Context, rc *edgekit.RequestContext, c edgekit.Completion) {
+			edgekit.RequestCompletedHookFunc(func(_ context.Context, rc *edgekit.RequestContext, c edgekit.Completion) {
 				unwound, _ := edgekit.State(rc, unwoundKey)
 				completed <- observed{
 					completion: c,
@@ -362,7 +362,7 @@ func TestAdmissionPassesRequestAndWriter(t *testing.T) {
 			},
 		},
 		Hooks: []any{
-			requestReceivedFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
+			edgekit.RequestReceivedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
 				if r != outerRequest {
 					t.Error("RequestReceived hook got another request, want the original one")
 				}

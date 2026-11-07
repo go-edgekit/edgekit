@@ -467,7 +467,7 @@ func TestSecureDefaultRejectionReachesCompletion(t *testing.T) {
 	}
 	var startTimes, routes, upstreams, states []bool
 	key := edgekit.NewStateKey[string]()
-	inspect := requestCompletedFunc(func(_ context.Context, rc *edgekit.RequestContext, _ edgekit.Completion) {
+	inspect := edgekit.RequestCompletedHookFunc(func(_ context.Context, rc *edgekit.RequestContext, _ edgekit.Completion) {
 		_, routed := rc.RoutePrefix()
 		_, selected := rc.SelectedUpstream()
 		_, stored := edgekit.State(rc, key)
@@ -610,15 +610,15 @@ func TestHookErrorsStopPhaseAndHideInternalDetails(t *testing.T) {
 			)
 			switch tc.phase {
 			case edgekit.PhaseRequestReceived:
-				first = requestReceivedFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+				first = edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 					return nil, fmt.Errorf("lookup: %w", secret)
 				})
 			case edgekit.PhaseBeforeUpstream:
-				first = beforeUpstreamFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+				first = edgekit.BeforeUpstreamHookFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 					return nil, fmt.Errorf("sign: %w", secret)
 				})
 			default:
-				first = upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+				first = edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 					return nil, fmt.Errorf("inspect: %w", secret)
 				})
 			}
@@ -722,7 +722,7 @@ func TestCompletionDuringPanicUnwinding(t *testing.T) {
 			var unwound, unwoundAtCompletion bool
 			completedCount := 0
 			var completion edgekit.Completion
-			hooks := requestCompletedFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
+			hooks := edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
 				completedCount++
 				unwoundAtCompletion = unwound
 				completion = c
@@ -1322,7 +1322,7 @@ func TestClientCancellationReachesUpstreamAndCompletion(t *testing.T) {
 				ctxErr     error
 			}
 			results := make(chan observed, 2)
-			hooks := requestCompletedFunc(func(ctx context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
+			hooks := edgekit.RequestCompletedHookFunc(func(ctx context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
 				completions.Add(1)
 				results <- observed{
 					completion: c,
@@ -1420,7 +1420,7 @@ func TestResponseHeaderTimeoutReachesCompletion(t *testing.T) {
 	transport.ResponseHeaderTimeout = 100 * time.Millisecond
 	var unwound, unwoundAtCompletion bool
 	var completion edgekit.Completion
-	hooks := requestCompletedFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
+	hooks := edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
 		unwoundAtCompletion = unwound
 		completion = c
 	})

@@ -130,7 +130,7 @@ func upgradeServeHTTP(g *edgekit.Gateway, w http.ResponseWriter) {
 func TestUpgradeBodyNotWritable(t *testing.T) {
 	t.Run("transport", func(t *testing.T) {
 		hookRan := false
-		hooks := upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+		hooks := edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 			hookRan = true
 
 			return nil, nil
@@ -191,7 +191,7 @@ func TestUpgradeBodyNotWritable(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			upstream := upgradeUpstream(t, "Connection: Upgrade\r\nUpgrade: echo\r\n")
-			hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
+			hooks := edgekit.UpstreamResponseHookFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 				_ = resp.Body.Close()
 				resp.Body = tc.body
 
@@ -445,7 +445,7 @@ func TestResponseHookNilBody(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests atomic.Int32
 			upstream := countingUpstream(t, &requests)
-			hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
+			hooks := edgekit.UpstreamResponseHookFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 				_ = resp.Body.Close()
 				resp.Body = nil
 				resp.Header.Del("Content-Length")

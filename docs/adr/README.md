@@ -36,6 +36,7 @@ Acceptance does not freeze precise Go interfaces or mean every preferred extensi
 | [0026](0026-relax-request-secure-defaults.md) | Accepted (amended 2026-11-06) | Relaxations | Gateway-wide `QueryUnchecked`, `HeaderNameDrop`, and `AllowAbsoluteForm`; the other request checks cannot be relaxed |
 | [0027](0027-request-trailers-at-the-end-of-the-body.md) | Accepted (refined by 0028) | Request trailers | Own trailer map; check all trailers at a successful end of the body; publish to middleware and the outbound request; 400 from the late-name evidence |
 | [0028](0028-response-body-failures-at-completion.md) | Accepted | Response-body failures | Original read errors after the response hooks reach completion in `PhaseResponseBody`, also after a commit; no change to rendering or abort behavior |
+| [0029](0029-access-log-extension-contract.md) | Accepted | Access-log extension | A `Sink` interface called synchronously at completion; a recovered sink panic drops the record; a `Record` with safe and sensitive fields and a `LogValue` of the safe fields; a record also without middleware; a generated `X-Request-ID` |
 
 ## Decision process
 
@@ -55,6 +56,7 @@ Do not silently change the rationale of accepted ADRs. Write a new ADR to supers
 5. Dedicated route-matched hooks (ADR-0003). These remain deferred until a test needs them.
 6. The server API (ADR-0016, ADR-0024): `Server`, `ServerConfig`, `NewServer`, and `NoTimeout`. TLS termination and certificate management are not decided.
 7. The protection API (ADR-0025 and ADR-0026): `BodyLimit`, `MaxBodyBytes`, `NoBodyLimit`, `DefaultBodyLimit`, `AdmissionBudget`, `EgressPolicy`, `EgressTransport`, `Resolver`, `DialError`, `QueryPolicy`, `HeaderNamePolicy`, and `AllowAbsoluteForm`. The default body limit can change in a later release, with a stated reason.
+8. The bundled extensions (ADR-0029): `accesslog.Recorder`, `Config`, `Sink`, `SinkFunc`, `Record`, and `RequestIDHeader`; and the outbound-signing demonstration `outboundsign.Signer`, which is not an authentication protocol. Its route key comes from route middleware, which does not decide between route bindings and route middleware (item 4).
 
 ## Experiments of the first implementation
 

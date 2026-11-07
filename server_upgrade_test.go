@@ -399,7 +399,7 @@ func TestShutdownWaitsForUpgradedHandlers(t *testing.T) {
 	upstream, _ := switchingUpstream(t, released, 0)
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	completionHook := requestCompletedFunc(func(context.Context, *edgekit.RequestContext, edgekit.Completion) {
+	completionHook := edgekit.RequestCompletedHookFunc(func(context.Context, *edgekit.RequestContext, edgekit.Completion) {
 		close(entered)
 		<-release
 	})

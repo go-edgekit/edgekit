@@ -23,6 +23,17 @@ type RequestReceivedHook interface {
 	RequestReceived(ctx context.Context, rc *RequestContext, r *http.Request) (*Rejection, error)
 }
 
+// RequestReceivedHookFunc is an adapter to use an ordinary function as a
+// [RequestReceivedHook], as [http.HandlerFunc] is for [http.Handler]. The
+// function must obey the contract of [RequestReceivedHook]. [New] rejects a nil
+// RequestReceivedHookFunc.
+type RequestReceivedHookFunc func(ctx context.Context, rc *RequestContext, r *http.Request) (*Rejection, error)
+
+// RequestReceived calls f(ctx, rc, r).
+func (f RequestReceivedHookFunc) RequestReceived(ctx context.Context, rc *RequestContext, r *http.Request) (*Rejection, error) {
+	return f(ctx, rc, r)
+}
+
 // BeforeUpstreamHook is a lifecycle hook that runs after the route middleware,
 // the upstream selection, and the rewrite of the outbound request, before the
 // transport sends it. Register it in [Config.Hooks]. Use it, for example, to
@@ -44,6 +55,17 @@ type RequestReceivedHook interface {
 // [PhaseBeforeUpstream].
 type BeforeUpstreamHook interface {
 	BeforeUpstream(ctx context.Context, rc *RequestContext, out *OutboundRequest) (*Rejection, error)
+}
+
+// BeforeUpstreamHookFunc is an adapter to use an ordinary function as a
+// [BeforeUpstreamHook], as [http.HandlerFunc] is for [http.Handler]. The
+// function must obey the contract of [BeforeUpstreamHook]. [New] rejects a nil
+// BeforeUpstreamHookFunc.
+type BeforeUpstreamHookFunc func(ctx context.Context, rc *RequestContext, out *OutboundRequest) (*Rejection, error)
+
+// BeforeUpstream calls f(ctx, rc, out).
+func (f BeforeUpstreamHookFunc) BeforeUpstream(ctx context.Context, rc *RequestContext, out *OutboundRequest) (*Rejection, error) {
+	return f(ctx, rc, out)
 }
 
 // UpstreamResponseHook is a lifecycle hook that runs after the upstream
@@ -85,6 +107,17 @@ type UpstreamResponseHook interface {
 	UpstreamResponse(ctx context.Context, rc *RequestContext, resp *http.Response) (*Rejection, error)
 }
 
+// UpstreamResponseHookFunc is an adapter to use an ordinary function as an
+// [UpstreamResponseHook], as [http.HandlerFunc] is for [http.Handler]. The
+// function must obey the contract of [UpstreamResponseHook]. [New] rejects a
+// nil UpstreamResponseHookFunc.
+type UpstreamResponseHookFunc func(ctx context.Context, rc *RequestContext, resp *http.Response) (*Rejection, error)
+
+// UpstreamResponse calls f(ctx, rc, resp).
+func (f UpstreamResponseHookFunc) UpstreamResponse(ctx context.Context, rc *RequestContext, resp *http.Response) (*Rejection, error) {
+	return f(ctx, rc, resp)
+}
+
 // ErrInvalidUpstreamResponse is the error that an [UpstreamResponseHook] wraps
 // when it finds that the upstream response is not valid, such as a missing
 // required signature. The gateway then sends 502 Bad Gateway, because the
@@ -106,6 +139,17 @@ var ErrInvalidUpstreamResponse = errors.New("invalid upstream response")
 // It must not keep rc after it returns. It can keep c.
 type RequestCompletedHook interface {
 	RequestCompleted(ctx context.Context, rc *RequestContext, c Completion)
+}
+
+// RequestCompletedHookFunc is an adapter to use an ordinary function as a
+// [RequestCompletedHook], as [http.HandlerFunc] is for [http.Handler]. The
+// function must obey the contract of [RequestCompletedHook]. [New] rejects a
+// nil RequestCompletedHookFunc.
+type RequestCompletedHookFunc func(ctx context.Context, rc *RequestContext, c Completion)
+
+// RequestCompleted calls f(ctx, rc, c).
+func (f RequestCompletedHookFunc) RequestCompleted(ctx context.Context, rc *RequestContext, c Completion) {
+	f(ctx, rc, c)
 }
 
 // HeaderOwner is an optional interface for a value in [Config.Hooks]. It

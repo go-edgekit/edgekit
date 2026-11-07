@@ -963,6 +963,11 @@ func TestInvalidHookProviders(t *testing.T) {
 			location: "hooks 0: is nil",
 		},
 		{
+			name:     "nil hook function",
+			provider: edgekit.BeforeUpstreamHookFunc(nil),
+			location: "hooks 0: is nil",
+		},
+		{
 			name:     "no hook interface",
 			provider: struct{}{},
 			location: "hooks 0: implements no hook interface",

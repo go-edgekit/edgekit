@@ -55,7 +55,7 @@ func TestDefaultProblemResponse(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hooks := requestReceivedFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			hooks := edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 				return tc.rejection, tc.err
 			})
 
@@ -416,15 +416,15 @@ func TestCustomRendererForEverySource(t *testing.T) {
 			providers := []any{completionHooks}
 			switch tc.hookPhase {
 			case edgekit.PhaseRequestReceived:
-				providers = append(providers, requestReceivedFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+				providers = append(providers, edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 					return tc.rejection, tc.hookErr
 				}))
 			case edgekit.PhaseBeforeUpstream:
-				providers = append(providers, beforeUpstreamFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+				providers = append(providers, edgekit.BeforeUpstreamHookFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 					return tc.rejection, tc.hookErr
 				}))
 			case edgekit.PhaseUpstreamResponse:
-				providers = append(providers, upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+				providers = append(providers, edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 					return tc.rejection, tc.hookErr
 				}))
 			default:

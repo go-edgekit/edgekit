@@ -77,7 +77,7 @@ func TestBeforeUpstreamHookChangesReachTransport(t *testing.T) {
 		seen view
 		kept *edgekit.OutboundRequest
 	)
-	hooks := beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+	hooks := edgekit.BeforeUpstreamHookFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 		seen = view{
 			method:        out.Method(),
 			url:           out.URL().String(),
@@ -192,7 +192,7 @@ func TestConfiguredTransportWithAndWithoutOutboundHooks(t *testing.T) {
 			completionHooks, completed := completions()
 			providers := []any{completionHooks}
 			if tc.withHooks {
-				providers = append(providers, beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+				providers = append(providers, edgekit.BeforeUpstreamHookFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 					out.Header().Set("X-Hook", "ran")
 
 					return nil, nil
@@ -266,7 +266,7 @@ func TestBeforeUpstreamHeaderRules(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			transport, sent := recordingTransport(t)
-			hooks := beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+			hooks := edgekit.BeforeUpstreamHookFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 				header := out.Header()
 				header.Set("X-User", "verified")
 				header.Set("Connection", "X-User")
@@ -417,14 +417,14 @@ func TestBeforeUpstreamInvalidHeaderFails(t *testing.T) {
 					Request:    r,
 				}, nil
 			})
-			hooks := beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+			hooks := edgekit.BeforeUpstreamHookFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 				out.Header()[tc.key] = []string{tc.value}
 
 				return nil, nil
 			})
 			var unwound, unwoundAtCompletion bool
 			var completion edgekit.Completion
-			completionHooks := requestCompletedFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
+			completionHooks := edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
 				unwoundAtCompletion = unwound
 				completion = c
 			})
@@ -512,7 +512,7 @@ func TestOutboundHostIsTheValueThatTheUpstreamGets(t *testing.T) {
 				"192.0.2.1:80",
 			} {
 				var seen string
-				hooks := beforeUpstreamFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+				hooks := edgekit.BeforeUpstreamHookFunc(func(_ context.Context, _ *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 					seen = out.Host()
 
 					return nil, nil

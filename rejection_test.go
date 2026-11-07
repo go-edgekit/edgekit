@@ -49,31 +49,31 @@ func TestHookRejectionStopsPhase(t *testing.T) {
 			var first, second any
 			switch phase {
 			case "request_received":
-				first = requestReceivedFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+				first = edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 					return &limited, nil
 				})
-				second = requestReceivedFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+				second = edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 					return later()
 				})
 			case "before_upstream":
-				first = beforeUpstreamFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+				first = edgekit.BeforeUpstreamHookFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 					return &limited, nil
 				})
-				second = beforeUpstreamFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+				second = edgekit.BeforeUpstreamHookFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 					return later()
 				})
 			case "upstream_response":
-				first = upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+				first = edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 					return later()
 				})
-				second = upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+				second = edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 					return &limited, nil
 				})
 			}
 
 			var unwound, unwoundAtCompletion bool
 			var completion edgekit.Completion
-			completed := requestCompletedFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
+			completed := edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
 				unwoundAtCompletion = unwound
 				completion = c
 			})
@@ -179,7 +179,7 @@ func TestRejectionHeadersAreSanitized(t *testing.T) {
 					"X-Allowed":         {"a\tb"},
 				},
 			}
-			hooks := requestReceivedFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			hooks := edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 				return &rejection, nil
 			})
 			server := httptest.NewUnstartedServer(newGateway(t, edgekit.Config{
@@ -534,10 +534,10 @@ func TestInvalidRejectionFails(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			output := captureDiagnostics(t)
 			later := false
-			hooks := requestReceivedFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			hooks := edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 				return &tc.rejection, nil
 			})
-			laterHooks := requestReceivedFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			laterHooks := edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 				later = true
 
 				return nil, nil
@@ -677,19 +677,19 @@ func TestInvalidRejectionInLaterPhases(t *testing.T) {
 				laterRan := false
 				var rejecting, later any
 				if phase.phase == edgekit.PhaseBeforeUpstream {
-					rejecting = beforeUpstreamFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+					rejecting = edgekit.BeforeUpstreamHookFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 						return &tc.rejection, nil
 					})
-					later = beforeUpstreamFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+					later = edgekit.BeforeUpstreamHookFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 						laterRan = true
 
 						return nil, nil
 					})
 				} else {
-					rejecting = upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+					rejecting = edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 						return &tc.rejection, nil
 					})
-					later = upstreamResponseFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
+					later = edgekit.UpstreamResponseHookFunc(func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error) {
 						laterRan = true
 
 						return nil, nil
@@ -834,7 +834,7 @@ func TestValidRejectionBoundaries(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hooks := requestReceivedFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			hooks := edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 				return &tc.rejection, nil
 			})
 			completionHooks, completed := completions()
@@ -880,7 +880,7 @@ func TestSharedRejectionIsNotChanged(t *testing.T) {
 		},
 	}
 	want := shared.Header.Clone()
-	hooks := requestReceivedFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+	hooks := edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 		return &shared, nil
 	})
 	g := newGateway(t, edgekit.Config{

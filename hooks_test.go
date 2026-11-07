@@ -11,38 +11,6 @@ import (
 	"github.com/go-edgekit/edgekit"
 )
 
-// requestReceivedFunc provides only the RequestReceived phase.
-type requestReceivedFunc func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error)
-
-// RequestReceived calls f.
-func (f requestReceivedFunc) RequestReceived(ctx context.Context, rc *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
-	return f(ctx, rc, r)
-}
-
-// beforeUpstreamFunc provides only the BeforeUpstream phase.
-type beforeUpstreamFunc func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error)
-
-// BeforeUpstream calls f.
-func (f beforeUpstreamFunc) BeforeUpstream(ctx context.Context, rc *edgekit.RequestContext, out *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
-	return f(ctx, rc, out)
-}
-
-// upstreamResponseFunc provides only the UpstreamResponse phase.
-type upstreamResponseFunc func(context.Context, *edgekit.RequestContext, *http.Response) (*edgekit.Rejection, error)
-
-// UpstreamResponse calls f.
-func (f upstreamResponseFunc) UpstreamResponse(ctx context.Context, rc *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
-	return f(ctx, rc, resp)
-}
-
-// requestCompletedFunc provides only the RequestCompleted phase.
-type requestCompletedFunc func(context.Context, *edgekit.RequestContext, edgekit.Completion)
-
-// RequestCompleted calls f.
-func (f requestCompletedFunc) RequestCompleted(ctx context.Context, rc *edgekit.RequestContext, c edgekit.Completion) {
-	f(ctx, rc, c)
-}
-
 // testHooks provides all phases for tests that need a complete lifecycle.
 type testHooks struct {
 	received  func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error)
@@ -86,9 +54,9 @@ func (h *testHooks) RequestCompleted(ctx context.Context, rc *edgekit.RequestCon
 }
 
 // completions records completion without registering processing hooks.
-func completions() (requestCompletedFunc, <-chan edgekit.Completion) {
+func completions() (edgekit.RequestCompletedHookFunc, <-chan edgekit.Completion) {
 	ch := make(chan edgekit.Completion, 16)
-	hook := requestCompletedFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
+	hook := edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
 		ch <- c
 	})
 
@@ -105,22 +73,22 @@ func TestHookAdaptersExposeOnlyTheirPhase(t *testing.T) {
 	}{
 		{
 			name:     "request received",
-			provider: requestReceivedFunc(nil),
+			provider: edgekit.RequestReceivedHookFunc(nil),
 			phase:    "RequestReceived",
 		},
 		{
 			name:     "before upstream",
-			provider: beforeUpstreamFunc(nil),
+			provider: edgekit.BeforeUpstreamHookFunc(nil),
 			phase:    "BeforeUpstream",
 		},
 		{
 			name:     "upstream response",
-			provider: upstreamResponseFunc(nil),
+			provider: edgekit.UpstreamResponseHookFunc(nil),
 			phase:    "UpstreamResponse",
 		},
 		{
 			name:     "request completed",
-			provider: requestCompletedFunc(nil),
+			provider: edgekit.RequestCompletedHookFunc(nil),
 			phase:    "RequestCompleted",
 		},
 		{
@@ -193,7 +161,7 @@ func TestOutboundHeaderCheckDoesNotDependOnHooks(t *testing.T) {
 				collector, completed := completions()
 				providers := []any{collector}
 				if withBefore {
-					providers = append(providers, beforeUpstreamFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
+					providers = append(providers, edgekit.BeforeUpstreamHookFunc(func(context.Context, *edgekit.RequestContext, *edgekit.OutboundRequest) (*edgekit.Rejection, error) {
 						return nil, nil
 					}))
 				}

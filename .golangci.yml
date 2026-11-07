@@ -33,6 +33,7 @@ linters:
     - nilnesserr
     - nilnil
     - noctx
+    - sloglint
     - usestdlibvars
     - usetesting
   settings:
@@ -47,8 +48,21 @@ linters:
             - "$gostd"
             - "golang.org/x"
             - "github.com/go-edgekit/edgekit"
+        # ADR-0011: bundled extensions and examples use only the public
+        # contract, so they must not import internal packages.
+        public:
+          files:
+            - "**/extensions/**"
+            - "**/examples/**"
+          deny:
+            - pkg: "github.com/go-edgekit/edgekit/internal"
+              desc: bundled extensions and examples use only the public API
     exhaustive:
       default-signifies-exhaustive: true
+    sloglint:
+      # Typed attributes cannot lose a key or a value, and a log of approved
+      # fields is easier to review as one attribute for each field.
+      attr-only: true
     godoclint:
       default: none
       enable:
@@ -126,9 +140,13 @@ linters:
           - noctx
       # ADR-0022: processing hooks return (*Rejection, error), and nil, nil
       # means that handling continues, as a nil result of the callback
-      # http.Transport.Proxy means no proxy. Core code keeps the check. Add the
-      # path of an extension package here when it implements a processing hook.
+      # http.Transport.Proxy means no proxy. Core code keeps the check.
+      # Extensions implement processing hooks, so the exclusion covers all of
+      # them.
       - path: _test\.go
+        linters:
+          - nilnil
+      - path: ^extensions/
         linters:
           - nilnil
 

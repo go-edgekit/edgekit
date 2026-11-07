@@ -372,7 +372,7 @@ func TestResponseHeaderRulesAfterHooks(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
+	hooks := edgekit.UpstreamResponseHookFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 		for name, value := range map[string]string{
 			"Connection":          "X-Hop",
 			"X-Hop":               "private",
@@ -533,7 +533,7 @@ func TestResponseContentLengthAfterHooks(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
+			hooks := edgekit.UpstreamResponseHookFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 				if tc.change != nil {
 					tc.change(resp.Header)
 				}
@@ -620,7 +620,7 @@ func TestUpgradeResponseHeaderRulesAfterHooks(t *testing.T) {
 		"X-Hop: private\r\n"+
 		"Keep-Alive: timeout=5\r\n")
 
-	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
+	hooks := edgekit.UpstreamResponseHookFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 		if resp.StatusCode != http.StatusSwitchingProtocols {
 			t.Errorf("hook got status %d, want 101", resp.StatusCode)
 		}
@@ -725,7 +725,7 @@ func TestUpgradeProtocolIsRestoredAfterHooks(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
+			hooks := edgekit.UpstreamResponseHookFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 				tc.change(resp.Header)
 
 				return nil, nil
@@ -795,7 +795,7 @@ func TestResponseHooksSkipInformationalResponses(t *testing.T) {
 	defer upstream.Close()
 
 	var statuses []int
-	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
+	hooks := edgekit.UpstreamResponseHookFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 		statuses = append(statuses, resp.StatusCode)
 
 		return nil, nil
@@ -836,7 +836,7 @@ func TestConnectionTokensDoNotDependOnMapOrder(t *testing.T) {
 	// One Connection entry names Connection itself. If the core removed
 	// fields while it read the tokens, the order of the map would decide
 	// whether it reads the other entry.
-	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
+	hooks := edgekit.UpstreamResponseHookFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 		resp.Header["Connection"] = []string{"Connection"}
 		resp.Header["connection"] = []string{"X-Hop"}
 		resp.Header["X-Hop"] = []string{"private"}
@@ -870,7 +870,7 @@ func TestConnectionTokensDoNotDependOnMapOrder(t *testing.T) {
 
 func TestUpgradeConnectionTokensDoNotDependOnMapOrder(t *testing.T) {
 	upstream := upgradeUpstream(t, "Connection: Upgrade\r\nUpgrade: echo\r\n")
-	hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
+	hooks := edgekit.UpstreamResponseHookFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 		resp.Header["Connection"] = []string{"Upgrade, Connection"}
 		resp.Header["connection"] = []string{"X-Hop"}
 		resp.Header["X-Hop"] = []string{"private"}
@@ -922,7 +922,7 @@ func TestResponseHooksGetTheGatewayContext(t *testing.T) {
 				route       string
 				derived     any
 			)
-			hooks := upstreamResponseFunc(func(ctx context.Context, rc *edgekit.RequestContext, _ *http.Response) (*edgekit.Rejection, error) {
+			hooks := edgekit.UpstreamResponseHookFunc(func(ctx context.Context, rc *edgekit.RequestContext, _ *http.Response) (*edgekit.Rejection, error) {
 				fromContext, ok := edgekit.FromContext(ctx)
 				sameContext = ok && rc != nil && fromContext == rc
 				if rc != nil {
@@ -1056,7 +1056,7 @@ func TestResponseHookCannotCrossTheUpgradeBoundary(t *testing.T) {
 					Request:    r,
 				}, nil
 			})
-			hooks := upstreamResponseFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
+			hooks := edgekit.UpstreamResponseHookFunc(func(_ context.Context, _ *edgekit.RequestContext, resp *http.Response) (*edgekit.Rejection, error) {
 				_ = resp.Body.Close()
 				resp.StatusCode = tc.changeTo
 				resp.Body = io.NopCloser(strings.NewReader("denied"))
