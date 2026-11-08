@@ -1,6 +1,6 @@
 # ADR-0031: Match routes before request-body processing
 
-- **Status:** Accepted
+- **Status:** Accepted (buffering configuration superseded in part by [ADR-0032](0032-inherited-request-buffering.md))
 - **Date:** 2026-11-07
 - **Decision owners:** Project maintainers
 - **Supersedes in part:** ADR-0003, ADR-0004, ADR-0018, and ADR-0025 (handling order, request hook, provisional body limits, and admission coverage); ADR-0027, ADR-0029, and ADR-0030 (references to global middleware and its observation coverage); ADR-0019 (path/query rewrites only through route configuration, and checks of available trailer values)

@@ -71,6 +71,15 @@ type Config struct {
 	// ceiling. The zero value is [DefaultBodyLimit].
 	BodyLimit BodyLimit
 
+	// RequestBuffering is the inherited request-buffering configuration. Nil
+	// or [NoRequestBuffering] keeps streaming as the default. A route can
+	// replace the complete configuration or explicitly select streaming.
+	// New copies the effective settings but shares the Budget across routes
+	// and requests. Each buffered route must have a finite effective body
+	// limit that fits the budget. See [RequestBuffering] for deadline support,
+	// timeouts, replay, and resource lifetime.
+	RequestBuffering *RequestBuffering
+
 	// Admission is the admission budget of the gateway (see
 	// [AdmissionBudget]). The gateway takes a slot before route matching,
 	// body reads, and processing extensions. Nil means no
@@ -133,8 +142,10 @@ type Route struct {
 	// budget. Routes that have the same budget share it.
 	Admission *AdmissionBudget
 
-	// RequestBuffering enables complete, bounded memory buffering before
-	// middleware. Nil keeps streaming. See [RequestBuffering] for required
+	// RequestBuffering selects complete, bounded memory buffering before
+	// middleware. Nil inherits [Config.RequestBuffering]. [NoRequestBuffering]
+	// explicitly selects streaming. Other values replace the complete gateway
+	// setting, without field merging. See [RequestBuffering] for required
 	// limits, deadline support, replay, and resource lifetime.
 	RequestBuffering *RequestBuffering
 }
@@ -155,7 +166,8 @@ type Route struct {
 //  6. Install the route's effective body limit ([Route.BodyLimit]).
 //  7. Reject an excessive declared body length with 413 Content Too Large.
 //  8. Take route admission ([Route.Admission]); reject saturation with 503.
-//  9. Run [RouteMatchedHook] checks, then optional [Route.RequestBuffering].
+//  9. Run [RouteMatchedHook] checks, then the optional effective request
+//     buffering ([Route.RequestBuffering] or [Config.RequestBuffering]).
 //  10. Run shared middleware, then route middleware.
 //  11. Select the upstream URL.
 //  12. Rewrite the outbound request. The path is the upstream URL path
@@ -605,8 +617,8 @@ func (g *Gateway) buildHandler(cfg Config, proxy *httputil.ReverseProxy) (http.H
 		}
 
 		var buffering *RequestBuffering
-		if r.RequestBuffering != nil {
-			copied := *r.RequestBuffering
+		if effective := r.RequestBuffering.resolve(cfg.RequestBuffering); effective != nil {
+			copied := *effective
 			buffering = &copied
 		}
 

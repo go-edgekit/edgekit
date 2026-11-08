@@ -47,7 +47,8 @@ const noBodyLimit int64 = -1
 // framing. It does not decompress, bound server cleanup reads or network
 // bytes, or bound middleware-generated bodies. Generated or decompressed
 // output needs its own bounds. Streaming is the default, without read-ahead;
-// [Route.RequestBuffering] explicitly enables complete bounded buffering.
+// [Config.RequestBuffering] and [Route.RequestBuffering] select complete
+// bounded buffering. Each buffered route needs a finite effective limit.
 //
 // A reader that reads more than the limit gets an error that wraps
 // [ErrRequestBodyTooLarge]. When the transport fails with this error, the

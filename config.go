@@ -30,7 +30,15 @@ func checkConfig(cfg Config) (compiledHooks, map[string]struct{}, []error) {
 		problems = append(problems, invalid("transport: %w", err))
 	}
 
-	problems = append(problems, checkRoutes(cfg.Routes, cfg.Admission, cfg.BodyLimit.resolve(DefaultBodyLimit))...)
+	// Routes that inherit an invalid gateway setting get no limit checks,
+	// because these checks need valid settings. The setting is reported once.
+	inherited := cfg.RequestBuffering
+	if err := checkBufferingSettings(inherited); err != nil {
+		problems = append(problems, invalid("request buffering: %w", err))
+		inherited = nil
+	}
+
+	problems = append(problems, checkRoutes(cfg.Routes, cfg.Admission, cfg.BodyLimit.resolve(DefaultBodyLimit), inherited)...)
 	problems = append(problems, checkProtections(cfg)...)
 
 	if i := slices.IndexFunc(cfg.SharedMiddleware, isNil); i >= 0 {
@@ -134,8 +142,9 @@ func checkBudget(b *AdmissionBudget) error {
 
 // checkRoutes validates routes without calling middleware. A route must not
 // use gatewayBudget, because then one request takes two slots of it.
-// gatewayLimit is the resolved gateway body limit that routes inherit.
-func checkRoutes(routes []Route, gatewayBudget *AdmissionBudget, gatewayLimit int64) []error {
+// gatewayLimit and gatewayBuffering are the defaults that routes inherit;
+// gatewayBuffering must be valid or nil.
+func checkRoutes(routes []Route, gatewayBudget *AdmissionBudget, gatewayLimit int64, gatewayBuffering *RequestBuffering) []error {
 	var problems []error
 
 	if len(routes) == 0 {
@@ -170,7 +179,7 @@ func checkRoutes(routes []Route, gatewayBudget *AdmissionBudget, gatewayLimit in
 			problems = append(problems, invalid("route %d: admission budget: is also the gateway budget", i))
 		}
 
-		if err := checkBuffering(r.RequestBuffering, r.BodyLimit.resolve(gatewayLimit)); err != nil {
+		if err := checkRouteBuffering(r.RequestBuffering, gatewayBuffering, r.BodyLimit.resolve(gatewayLimit)); err != nil {
 			problems = append(problems, invalid("route %d: request buffering: %w", i, err))
 		}
 	}

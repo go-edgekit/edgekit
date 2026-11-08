@@ -832,15 +832,16 @@ func ExampleRequestBuffering() {
 				Prefix:    "/uploads/",
 				Upstream:  selector,
 				BodyLimit: edgekit.MaxBodyBytes(8 << 20),
-				RequestBuffering: &edgekit.RequestBuffering{
-					Budget:       budget,
-					IdleTimeout:  10 * time.Second,
-					TotalTimeout: time.Minute,
-				},
 				Middleware: []edgekit.Middleware{
 					checksum,
 				},
 			},
+		},
+		// Routes inherit these complete settings and share the same budget.
+		RequestBuffering: &edgekit.RequestBuffering{
+			Budget:       budget,
+			IdleTimeout:  10 * time.Second,
+			TotalTimeout: time.Minute,
 		},
 	})
 	if err != nil {
@@ -911,6 +912,59 @@ func ExampleRequestBuffering() {
 	// middleware read 5 bytes
 	// upstream got 5 bytes with Content-Length 5
 	// 200 stored
+}
+
+func ExampleNoRequestBuffering() {
+	budget, err := edgekit.NewRequestBufferBudget(32 << 20)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	selector, err := edgekit.StaticUpstream(&url.URL{
+		Scheme: "https",
+		Host:   "upstream.example",
+	})
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	gateway, err := edgekit.New(edgekit.Config{
+		RequestBuffering: &edgekit.RequestBuffering{
+			Budget:       budget,
+			IdleTimeout:  10 * time.Second,
+			TotalTimeout: time.Minute,
+		},
+		Routes: []edgekit.Route{
+			{
+				// This route inherits buffering and the default body limit.
+				Prefix:   "/uploads/",
+				Upstream: selector,
+			},
+			{
+				// An indefinite request stream cannot use complete buffering.
+				// Its upstream must enforce appropriate resource bounds.
+				Prefix:           "/streams/",
+				Upstream:         selector,
+				BodyLimit:        edgekit.NoBodyLimit(),
+				RequestBuffering: edgekit.NoRequestBuffering(),
+			},
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+	defer gateway.CloseIdleConnections()
+
+	fmt.Println("configured buffered uploads and a streaming route")
+
+	// Output:
+	// configured buffered uploads and a streaming route
 }
 
 func ExampleNewEgressTransport() {
