@@ -239,6 +239,7 @@ func ExampleUpstreamSelector() {
 				Middleware: []edgekit.Middleware{region},
 			},
 		},
+		ManagedHeaders: []string{"X-Region"},
 	})
 	if err != nil {
 		fmt.Println(err)
@@ -408,7 +409,8 @@ func ExampleBeforeUpstreamHook() {
 				signer{key: []byte("example key")},
 			},
 		},
-		Transport: transport,
+		ManagedHeaders: []string{"X-Signature"},
+		Transport:      transport,
 	})
 	if err != nil {
 		fmt.Println(err)

@@ -60,33 +60,56 @@ func outcomeOf(status int, c edgekit.Completion) requestOutcome {
 	return out
 }
 
-func TestRequestBufferingCompletesBeforeMiddlewareAndPreservesTrailers(t *testing.T) {
-	for _, http2 := range []bool{false, true} {
-		t.Run(fmt.Sprintf("http2=%t", http2), func(t *testing.T) {
+func TestRequestBufferingCompletesBeforeMiddlewareAndPreservesUnmanagedTrailers(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		inboundHTTP2  bool
+		upstreamHTTP2 bool
+	}{
+		{
+			name: "http1 to http1",
+		},
+		{
+			name:          "http1 to http2",
+			upstreamHTTP2: true,
+		},
+		{
+			name:         "http2 to http1",
+			inboundHTTP2: true,
+		},
+		{
+			name:          "http2 to http2",
+			inboundHTTP2:  true,
+			upstreamHTTP2: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			type observation struct {
-				body    string
-				trailer string
+				body     string
+				trailers string
 			}
 			upstreamSaw := make(chan observation, 1)
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstream, transport := protocolUpstream(t, tc.upstreamHTTP2, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.ProtoMajor == 2; got != tc.upstreamHTTP2 {
+					t.Errorf("upstream HTTP/2 = %t, want %t", got, tc.upstreamHTTP2)
+				}
+
 				body, err := io.ReadAll(r.Body)
 				if err != nil {
 					t.Errorf("upstream ReadAll(body) error = %v, want nil", err)
 				}
 				upstreamSaw <- observation{
-					body:    string(body),
-					trailer: r.Trailer.Get("X-End"),
+					body:     string(body),
+					trailers: trailerValues(r.Trailer),
 				}
 				w.WriteHeader(http.StatusNoContent)
 			}))
-			t.Cleanup(upstream.Close)
 
 			var replayCalls atomic.Int32
 			var transportCalls atomic.Int32
-			transport := edgekit.NewTransport()
-			t.Cleanup(transport.CloseIdleConnections)
 			g := newGateway(t, edgekit.Config{
-				BodyLimit: edgekit.MaxBodyBytes(2),
+				BodyLimit:      edgekit.MaxBodyBytes(2),
+				ManagedHeaders: []string{"X-Managed"},
 				Routes: []edgekit.Route{
 					{
 						Prefix:           "/api/",
@@ -98,8 +121,11 @@ func TestRequestBufferingCompletesBeforeMiddlewareAndPreservesTrailers(t *testin
 				SharedMiddleware: []edgekit.Middleware{
 					func(next http.Handler) http.Handler {
 						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-							if got := r.Trailer.Get("X-End"); got != "checked" {
-								t.Errorf("middleware entry: Trailer.Get(X-End) = %q, want %q", got, "checked")
+							if got := r.ProtoMajor == 2; got != tc.inboundHTTP2 {
+								t.Errorf("inbound HTTP/2 = %t, want %t", got, tc.inboundHTTP2)
+							}
+							if got := trailerValues(r.Trailer); got != "X-End=checked" {
+								t.Errorf("middleware entry: trailers = %q, want %q", got, "X-End=checked")
 							}
 							if r.GetBody == nil {
 								t.Error("middleware entry: GetBody = nil, want a replay function")
@@ -148,15 +174,17 @@ func TestRequestBufferingCompletesBeforeMiddlewareAndPreservesTrailers(t *testin
 					return transport.RoundTrip(r)
 				}),
 			})
-			ts := startServer(t, g, edgekit.ServerConfig{}, serverOptions{tls: http2})
+			ts := startServer(t, g, edgekit.ServerConfig{}, serverOptions{tls: tc.inboundHTTP2})
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.url()+"/api/upload", unknownLength{strings.NewReader("abcdef")})
 			if err != nil {
 				t.Fatal(err)
 			}
 			req.Trailer = http.Header{
-				"X-End": {"checked"},
+				"X-End":           {"checked"},
+				"X-Managed":       {"spoofed"},
+				"X-Forwarded-For": {"203.0.113.9"},
 			}
-			resp, err := ts.client(t, http2).Do(req)
+			resp, err := ts.client(t, tc.inboundHTTP2).Do(req)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -178,14 +206,14 @@ func TestRequestBufferingCompletesBeforeMiddlewareAndPreservesTrailers(t *testin
 			want := result{
 				status: http.StatusNoContent,
 				upstream: observation{
-					body:    "abcdef",
-					trailer: "checked",
+					body:     "abcdef",
+					trailers: "X-End=checked",
 				},
 				replays:   8,
 				forwarded: 1,
 			}
 			if got != want {
-				t.Errorf("POST /api/upload with trailer X-End = %+v, want %+v", got, want)
+				t.Errorf("POST /api/upload with trailers X-End, X-Managed, and X-Forwarded-For = %+v, want %+v", got, want)
 			}
 		})
 	}

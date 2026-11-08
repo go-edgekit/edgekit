@@ -29,6 +29,11 @@ import (
 // without forwarding. Routing and its protections remain fixed: a path
 // change is an outbound rewrite, not a request to select another route.
 //
+// Declare middleware-owned request headers in [Config.ManagedHeaders] or
+// [Config.HeaderOwners]. Without a declaration, client values can reach the
+// middleware, and client Connection options can remove a header that the
+// middleware sets before next.
+//
 // Middleware that replaces or expands the body owns its output bounds, body
 // closure, ContentLength, trailers, and GetBody. The inbound limit does not
 // bound generated content. The gateway clears a caller-provided inbound
