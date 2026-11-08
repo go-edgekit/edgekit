@@ -38,9 +38,10 @@ Acceptance does not freeze precise Go interfaces or mean every preferred extensi
 | [0028](0028-response-body-failures-at-completion.md) | Accepted | Response-body failures | Original read errors after the response hooks reach completion in `PhaseResponseBody`, also after a commit; no change to rendering or abort behavior |
 | [0029](0029-access-log-extension-contract.md) | Accepted (registration superseded in part by 0030) | Access-log extension | A `Sink` interface called synchronously at completion; a recovered sink panic drops the record; a `Record` with safe and sensitive fields and a `LogValue` of the safe fields; a record also without middleware; a generated `X-Request-ID` |
 | [0030](0030-typed-hook-phase-lists.md) | Accepted | Hook registration | Independent typed phase lists in execution order; separate header-owner declarations |
-| [0031](0031-route-first-request-bodies.md) | Accepted | Route-first request bodies | Fixed matching before shared processing; route-aware restricted hooks; bounded memory buffering and request-scoped replay |
+| [0031](0031-route-first-request-bodies.md) | Accepted (buffering configuration superseded in part by 0032) | Route-first request bodies | Fixed matching before shared processing; route-aware restricted hooks; bounded memory buffering and request-scoped replay |
+| [0032](0032-inherited-request-buffering.md) | Accepted | Inherited request buffering | Gateway buffering defaults; complete route overrides and explicit streaming; one shared budget for inheriting routes |
 
-[ADR-0031](0031-route-first-request-bodies.md) supersedes the handling-order and body-processing parts of ADR-0003, ADR-0004, ADR-0018, and ADR-0025, and the affected rewrite and observation contracts in ADR-0019, ADR-0027, ADR-0029, and ADR-0030. It fixes route selection before body processing and defines explicit bounded memory buffering.
+[ADR-0031](0031-route-first-request-bodies.md) supersedes the handling-order and body-processing parts of ADR-0003, ADR-0004, ADR-0018, and ADR-0025, and the affected rewrite and observation contracts in ADR-0019, ADR-0027, ADR-0029, and ADR-0030. It fixes route selection before body processing and defines explicit bounded memory buffering. [ADR-0032](0032-inherited-request-buffering.md) replaces its route-only configuration contract with gateway defaults, complete route overrides, and explicit streaming.
 
 ## Decision process
 

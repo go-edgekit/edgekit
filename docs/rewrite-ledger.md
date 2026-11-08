@@ -253,6 +253,40 @@ At "head", `Server` did not use the transfer manager when the transfer idle time
 
 The resource tests check segment capacity and shared ownership, 64 concurrent reservation attempts, replay concurrency and revocation, and reservation lifetime during responses and upgrades. They do not measure RSS, garbage-collection headroom, fatal allocation failure, or sustained deployment load. No external HTTP conformance suite or online vulnerability audit was run. Passing these checks is not production validation.
 
+## Inherited buffering follow-up (ADR-0032)
+
+A nil route buffering setting now inherits `Config.RequestBuffering`. With no gateway default, existing routes still stream. `NoRequestBuffering()` explicitly selects streaming without changing the body limit or admission. An explicit enabled configuration replaces the complete default. No tests are removed.
+
+| Contract | Tests |
+| --- | --- |
+| Gateway defaults, complete route overrides, and effective body limits; invalid partial or conflicting settings, each with exactly one problem | `request_buffer_default_test.go:TestInheritedRequestBufferConfiguration` |
+| An invalid gateway default is reported once, not again for each inheriting route; routes with their own settings are still checked | `request_buffer_default_test.go:TestInvalidGatewayRequestBufferingIsReportedOnce` |
+| Runtime selection on HTTP/1.1 and HTTP/2; an override uses its larger budget and body limit for a body larger than the gateway limit | `request_buffer_default_test.go:TestGatewayRequestBufferingSelection` |
+| Changes to gateway, streaming, and buffering settings after `New` do not change handling | `request_buffer_default_test.go:TestRequestBufferingSettingsAreCopied` |
+| Streaming needs no buffering deadline support and retains the inbound body limit, including the exact limit and actual overflow | `request_buffer_default_test.go:TestExplicitStreamingKeepsBodyLimitWithoutBufferDeadlineSupport` |
+| Inheriting routes share one budget; streaming still works while it is full; capacity returns after handling | `request_buffer_default_test.go:TestGatewayRequestBufferBudgetIsSharedAcrossRoutes` |
+| Public setup for inherited buffering and an explicit streaming route | `example_test.go:ExampleRequestBuffering`, `example_test.go:ExampleNoRequestBuffering` |
+
+The existing buffering tests retain coverage of checked EOF, malformed input, trailers, replay lifetime, timeouts, cancellation, panic, shutdown, upgrades, and absence of transport replay retries. No request parser or protocol behavior changes in this follow-up.
+
+### Verification record (ADR-0032)
+
+These commands passed from the `gateway-request-buffering` worktree:
+
+```text
+nix develop -c just check
+nix develop -c go test -race -count=10 -shuffle=on -run 'Test(InheritedRequestBufferConfiguration|InvalidGatewayRequestBuffering|GatewayRequestBuffer|ExplicitStreaming)' .
+git diff --check
+```
+
+The full check includes lint, workflow checks, shuffled tests, all-package race tests, vet, and module-tidy checks. Zizmor runs offline; network-dependent audits are not verified. No process-memory, sustained-load, or external HTTP conformance measurement is made, because this change selects existing buffering or streaming handling at construction.
+
+Regression probes were restored before final verification:
+
+- With the gateway default removed from handler construction, `nix develop -c go test -count=1 -run 'TestGatewayRequestBufferingSelection/inherited_buffering|TestRequestBufferingSettingsAreCopied' .` failed on both HTTP versions and for the inheriting route because middleware got no replay.
+- With the gateway default removed from route validation, `nix develop -c go test -count=1 -run 'TestInheritedRequestBufferConfiguration/(inherited_default_body_limit_exceeds_budget|route_increases_limit_beyond_inherited_budget|route_disables_limit_with_inherited_buffering|inherited_disabled_limit)' .` failed all four cases because invalid configurations were accepted.
+- With the gateway default checked again for each inheriting route, `nix develop -c go test -count=1 -run 'TestInvalidGatewayRequestBufferingIsReportedOnce' .` failed because `New` reported the invalid default for routes 0 and 1 as well as for the gateway.
+
 ## Slice 6: bundled extensions
 
 | Prototype test | Behavior | Status | New tests | ADR |

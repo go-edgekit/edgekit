@@ -12,8 +12,13 @@ import (
 )
 
 // RequestBuffering enables complete request buffering before processing
-// middleware. Set it on [Route.RequestBuffering]; nil keeps streaming. New
-// copies this configuration and shares its Budget between requests.
+// middleware. Set it on [Config.RequestBuffering] as an inherited default,
+// or on [Route.RequestBuffering] to replace that default. A nil route setting
+// inherits the gateway setting; a nil gateway setting keeps streaming. Use
+// [NoRequestBuffering] to select streaming explicitly. New copies each
+// effective configuration and shares its Budget between requests. A non-nil
+// zero value is invalid; it does not inherit individual fields. Do not change
+// configuration values while New reads them.
 //
 // Buffering requires a finite effective [BodyLimit], a Budget large enough
 // for that limit, and positive explicit timeouts. A request with a body also
@@ -69,7 +74,8 @@ import (
 // failures (500), not malformed-input rejections. See [PhaseRequestBuffering]
 // and [Gateway].
 type RequestBuffering struct {
-	// Budget is required and can be shared across routes and gateways.
+	// Budget is required for enabled buffering and can be shared across
+	// routes and gateways.
 	Budget *RequestBufferBudget
 
 	// IdleTimeout limits one blocking read. It must be positive.
@@ -78,6 +84,36 @@ type RequestBuffering struct {
 	// TotalTimeout limits the complete inbound buffering phase. It must be
 	// positive. Neither timeout has a default or a disabled value.
 	TotalTimeout time.Duration
+
+	// disabled distinguishes an explicit streaming choice from inheritance.
+	disabled bool
+}
+
+// NoRequestBuffering returns a configuration that explicitly selects streaming.
+// Use it on [Route.RequestBuffering] to override the gateway default, or on
+// [Config.RequestBuffering] to keep streaming as the default. It does not
+// disable the body limit or admission. Each call returns a new value owned by
+// the caller; New copies it. Do not add a budget or timeouts to this value:
+// New rejects such settings with [ErrInvalidConfiguration]. The returned
+// configuration has no storage, background work, or Close operation.
+func NoRequestBuffering() *RequestBuffering {
+	return &RequestBuffering{
+		disabled: true,
+	}
+}
+
+// resolve selects the complete configuration; nil inherits fallback, and
+// fields are never merged.
+func (rb *RequestBuffering) resolve(fallback *RequestBuffering) *RequestBuffering {
+	if rb == nil {
+		rb = fallback
+	}
+
+	if rb == nil || rb.disabled {
+		return nil
+	}
+
+	return rb
 }
 
 // RequestBufferBudget limits aggregate reserved stored-body bytes. Make it
@@ -129,8 +165,38 @@ func (b *RequestBufferBudget) release(bytes int64) {
 	b.mu.Unlock()
 }
 
-// checkBuffering rejects implicit or unbounded resource settings.
-func checkBuffering(cfg *RequestBuffering, limit int64) error {
+// checkBufferingSettings checks one configuration without a body limit.
+func checkBufferingSettings(cfg *RequestBuffering) error {
+	if cfg == nil {
+		return nil
+	}
+
+	if cfg.disabled {
+		if cfg.Budget != nil || cfg.IdleTimeout != 0 || cfg.TotalTimeout != 0 {
+			return errors.New("streaming configuration contains buffering settings")
+		}
+
+		return nil
+	}
+
+	switch {
+	case cfg.Budget == nil || cfg.Budget.capacity <= 0:
+		return errors.New("requires a constructed byte budget")
+	case cfg.IdleTimeout <= 0 || cfg.TotalTimeout <= 0:
+		return errors.New("requires positive idle and total timeouts")
+	}
+
+	return nil
+}
+
+// checkRouteBuffering checks the route setting and the effective configuration
+// against the effective route limit. The gateway setting must be valid or nil.
+func checkRouteBuffering(route, gateway *RequestBuffering, limit int64) error {
+	if err := checkBufferingSettings(route); err != nil {
+		return err
+	}
+
+	cfg := route.resolve(gateway)
 	if cfg == nil {
 		return nil
 	}
@@ -138,12 +204,8 @@ func checkBuffering(cfg *RequestBuffering, limit int64) error {
 	switch {
 	case limit == noBodyLimit:
 		return errors.New("requires a finite effective body limit")
-	case cfg.Budget == nil || cfg.Budget.capacity <= 0:
-		return errors.New("requires a constructed byte budget")
 	case cfg.Budget.capacity < limit:
 		return errors.New("byte budget is smaller than the effective body limit")
-	case cfg.IdleTimeout <= 0 || cfg.TotalTimeout <= 0:
-		return errors.New("requires positive idle and total timeouts")
 	}
 
 	return nil
