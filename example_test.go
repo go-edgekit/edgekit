@@ -481,7 +481,7 @@ func ExampleSetState() {
 				Upstream: selector,
 			},
 		},
-		Middleware: []edgekit.Middleware{ids.Middleware},
+		SharedMiddleware: []edgekit.Middleware{ids.Middleware},
 		Hooks: edgekit.Hooks{
 			RequestCompleted: []edgekit.RequestCompletedHook{
 				ids,
@@ -495,15 +495,15 @@ func ExampleSetState() {
 	}
 	defer gateway.CloseIdleConnections()
 
-	// The secure defaults reject the last request before any middleware
-	// runs, so it has no ID.
+	// A route miss and a secure-default rejection skip processing middleware,
+	// so neither has a generated ID.
 	for _, path := range []string{"/api/users", "/admin", "/api/../admin"} {
 		gateway.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
 	}
 
 	// Output:
 	// req-1: route "/api/", rejection "", failure false
-	// req-2: route "", rejection "no_route", failure false
+	// no ID: route "", rejection "no_route", failure false
 	// no ID: route "", rejection "invalid_path", failure false
 }
 
@@ -520,9 +520,9 @@ var missingKey = edgekit.Rejection{
 	},
 }
 
-// RequestReceived rejects a request without the X-Api-Key header. A failure,
+// RouteMatched rejects a request without the X-Api-Key header. A failure,
 // such as a key store that is down, would be the error result instead.
-func (apiKeys) RequestReceived(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
+func (apiKeys) RouteMatched(_ context.Context, _ *edgekit.RequestContext, r *http.Request) (*edgekit.Rejection, error) {
 	if r.Header.Get("X-Api-Key") == "" {
 		return &missingKey, nil
 	}
@@ -554,7 +554,7 @@ func ExampleRejection() {
 			},
 		},
 		Hooks: edgekit.Hooks{
-			RequestReceived: []edgekit.RequestReceivedHook{
+			RouteMatched: []edgekit.RouteMatchedHook{
 				apiKeys{},
 			},
 		},
@@ -765,6 +765,152 @@ func ExampleNewAdmissionBudget() {
 	// Output:
 	// second request: 503 {"type":"about:blank","title":"Service Unavailable","status":503,"reason":"admission_saturated"}
 	// first request: 200 upstream response
+}
+
+func ExampleRequestBuffering() {
+	received := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		received <- fmt.Sprintf("upstream got %d bytes with Content-Length %d", len(body), r.ContentLength)
+		_, _ = io.WriteString(w, "stored")
+	}))
+	defer upstream.Close()
+
+	target, err := url.Parse(upstream.URL)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	selector, err := edgekit.StaticUpstream(target)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	// The budget limits the stored-body bytes of all buffered requests that
+	// share it. It must hold at least the effective body limit of a route.
+	budget, err := edgekit.NewRequestBufferBudget(32 << 20)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	// checksum reads the complete buffered body before the upstream gets it,
+	// and then forwards a new replay cursor of the same content.
+	checksum := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			body, readErr := io.ReadAll(r.Body)
+			_ = r.Body.Close()
+			if readErr != nil {
+				http.Error(w, "", http.StatusInternalServerError)
+
+				return
+			}
+
+			fmt.Printf("middleware read %d bytes\n", len(body))
+
+			replay, replayErr := r.GetBody()
+			if replayErr != nil {
+				http.Error(w, "", http.StatusInternalServerError)
+
+				return
+			}
+
+			out := r.Clone(r.Context())
+			out.Body = replay
+			next.ServeHTTP(w, out)
+		})
+	}
+
+	gateway, err := edgekit.New(edgekit.Config{
+		Routes: []edgekit.Route{
+			{
+				Prefix:    "/uploads/",
+				Upstream:  selector,
+				BodyLimit: edgekit.MaxBodyBytes(8 << 20),
+				RequestBuffering: &edgekit.RequestBuffering{
+					Budget:       budget,
+					IdleTimeout:  10 * time.Second,
+					TotalTimeout: time.Minute,
+				},
+				Middleware: []edgekit.Middleware{
+					checksum,
+				},
+			},
+		},
+	})
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+	defer gateway.CloseIdleConnections()
+
+	// Buffering needs the scoped read deadlines of Server. A request with a
+	// body to a buffered route fails with 500 on another server.
+	server, err := edgekit.NewServer(gateway, edgekit.ServerConfig{})
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	var lc net.ListenConfig
+	listener, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		_ = server.Serve(listener)
+	}()
+	defer func() {
+		_ = server.Close()
+		<-served
+	}()
+
+	// The MultiReader hides the length, so the client uses chunked framing.
+	// The gateway forwards the complete buffered body with a declared length.
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "http://"+listener.Addr().String()+"/uploads/file", io.MultiReader(strings.NewReader("hello")))
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		fmt.Println(err)
+
+		return
+	}
+
+	body, readErr := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if readErr != nil {
+		fmt.Println(readErr)
+
+		return
+	}
+
+	fmt.Println(<-received)
+	fmt.Println(response.StatusCode, string(body))
+
+	// Output:
+	// middleware read 5 bytes
+	// upstream got 5 bytes with Content-Length 5
+	// 200 stored
 }
 
 func ExampleNewEgressTransport() {

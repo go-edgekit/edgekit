@@ -47,7 +47,7 @@ import (
 type Record struct {
 	// Observed is true when the middleware of the recorder handled the
 	// request. When it is false, only Completion is set: for example for a
-	// rejection by the secure defaults, which occurs before any middleware,
+	// rejection by the secure defaults, routing, admission, or buffering,
 	// or when the middleware is not registered.
 	Observed bool
 

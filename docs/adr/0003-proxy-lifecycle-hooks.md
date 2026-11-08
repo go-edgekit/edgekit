@@ -1,6 +1,6 @@
 # ADR-0003: Expose a small, phase-oriented proxy lifecycle
 
-- **Status:** Accepted
+- **Status:** Accepted; request-phase placement superseded in part by [ADR-0031](0031-route-first-request-bodies.md)
 - **Date:** 2026-10-31
 - **Decision owners:** Project maintainers
 

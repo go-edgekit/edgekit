@@ -1,6 +1,6 @@
 # ADR-0025: Core protections: body limit, admission, and egress
 
-- **Status:** Accepted
+- **Status:** Accepted; body-limit replacement, handling order, and admission coverage superseded in part by [ADR-0031](0031-route-first-request-bodies.md)
 - **Date:** 2026-11-05
 - **Decision owners:** Project maintainers
 - **Refines:** [ADR-0012](0012-secure-defaults-and-configurable-protections.md) (body limit, admission, and egress)

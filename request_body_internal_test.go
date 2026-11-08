@@ -31,13 +31,13 @@ func newLimitedBody(size int, limit int64) (*requestBody, *countingReader) {
 	}
 	b := &requestBody{
 		ReadCloser: io.NopCloser(source),
+		limit:      limit,
 	}
-	b.limit.Store(limit)
 
 	return b, source
 }
 
-func TestOverflowStaysFinalAfterLimitIsDisabled(t *testing.T) {
+func TestOverflowStaysFinal(t *testing.T) {
 	b, source := newLimitedBody(100, 10)
 	buf := make([]byte, 32)
 
@@ -45,15 +45,11 @@ func TestOverflowStaysFinalAfterLimitIsDisabled(t *testing.T) {
 		t.Fatalf("Read() over the limit: error = %v, want ErrRequestBodyTooLarge", err)
 	}
 
-	if b.setLimit(noBodyLimit) {
-		t.Error("setLimit(noBodyLimit) after an overflow = true, want false")
-	}
-
 	readBefore := source.read
 	n, err := b.Read(buf)
 
 	if n != 0 || !errors.Is(err, ErrRequestBodyTooLarge) {
-		t.Errorf("Read() after the limit was disabled = %d, %v; want 0, ErrRequestBodyTooLarge", n, err)
+		t.Errorf("Read() after overflow = %d, %v; want 0, ErrRequestBodyTooLarge", n, err)
 	}
 
 	if source.read != readBefore {
@@ -63,34 +59,6 @@ func TestOverflowStaysFinalAfterLimitIsDisabled(t *testing.T) {
 	var maxBytes *http.MaxBytesError
 	if !errors.As(err, &maxBytes) || maxBytes.Limit != 10 {
 		t.Errorf("Read() after the overflow: error = %v, want a MaxBytesError with the limit 10", err)
-	}
-}
-
-// A goroutine that reads the body while setLimit runs can add bytes after
-// setLimit checked them. Then a reader sees a limit below the bytes that were
-// read, without the overflow mark.
-func TestReadWithLimitBelowBytesRead(t *testing.T) {
-	b, source := newLimitedBody(100, 64)
-	buf := make([]byte, 50)
-
-	if n, err := b.Read(buf); n != 50 || err != nil {
-		t.Fatalf("Read() below the limit = %d, %v; want 50, nil", n, err)
-	}
-
-	b.limit.Store(10)
-	readBefore := source.read
-	n, err := b.Read(buf)
-
-	if n != 0 || !errors.Is(err, ErrRequestBodyTooLarge) {
-		t.Errorf("Read() with the lower limit = %d, %v; want 0, ErrRequestBodyTooLarge", n, err)
-	}
-
-	if source.read != readBefore {
-		t.Errorf("Read() with the lower limit took %d bytes from the body, want 0", source.read-readBefore)
-	}
-
-	if !b.overflowFound() {
-		t.Error("overflowFound() = false, want true")
 	}
 }
 

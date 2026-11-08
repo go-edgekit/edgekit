@@ -1,6 +1,6 @@
 # ADR-0029: Define the contract of the access-log extension
 
-- **Status:** Accepted (registration superseded in part by [ADR-0030](0030-typed-hook-phase-lists.md))
+- **Status:** Accepted; registration superseded in part by [ADR-0030](0030-typed-hook-phase-lists.md); shared-middleware placement and early-outcome observation coverage superseded in part by [ADR-0031](0031-route-first-request-bodies.md)
 - **Date:** 2026-11-06
 - **Decision owners:** Project maintainers
 - **Refines:** [ADR-0009](0009-outcomes-errors-and-early-responses.md), [ADR-0014](0014-multi-module-repository.md), and [ADR-0018](0018-completion-observes-gateway-rejections.md)

@@ -1,6 +1,6 @@
 # ADR-0004: Support standard HTTP middleware alongside lifecycle hooks
 
-- **Status:** Accepted
+- **Status:** Accepted; handling order superseded in part by [ADR-0031](0031-route-first-request-bodies.md)
 - **Date:** 2026-10-31
 - **Decision owners:** Project maintainers
 

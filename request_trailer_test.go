@@ -30,7 +30,7 @@ func TestConnectionOptionsRemoveRequestTrailers(t *testing.T) {
 			},
 		},
 		{
-			name:     "multiple Connection entries and mixed-case options",
+			name:     "mixed-case Connection options",
 			declared: "Kept, X-Hop, X-Other",
 			headers: []string{
 				"Connection: x-hOP",
@@ -54,7 +54,7 @@ func TestConnectionOptionsRemoveRequestTrailers(t *testing.T) {
 					},
 				},
 				Transport: transport,
-				Middleware: []edgekit.Middleware{
+				SharedMiddleware: []edgekit.Middleware{
 					func(next http.Handler) http.Handler {
 						return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 							names := make([]string, 0, len(r.Trailer))

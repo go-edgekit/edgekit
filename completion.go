@@ -78,14 +78,21 @@ type Failure struct {
 type Phase int
 
 // The phases of a [Failure]. A phase is a stage of request handling, not a
-// hook: a stage can fail also when no hook is configured for it.
+// hook: a stage can fail also when no hook is configured for it. The
+// constants are in execution order. Their numeric values are not stable
+// between versions, so logs and stored records must use [Phase.String].
 const (
 	// PhaseUnknown is a failure that [net/http/httputil.ReverseProxy]
 	// reports before a known stage of the gateway.
 	PhaseUnknown Phase = iota
 
-	// PhaseRequestReceived is the stage of the [RequestReceivedHook] hooks.
-	PhaseRequestReceived
+	// PhaseRouteMatched is the stage of the [RouteMatchedHook] checks.
+	PhaseRouteMatched
+
+	// PhaseRequestBuffering is complete inbound buffering before middleware.
+	// Only established inbound input or deadline failures give 400 or 408;
+	// unknown reader errors and internal defects give 500.
+	PhaseRequestBuffering
 
 	// PhaseUpstreamSelection is the selection of the upstream URL.
 	PhaseUpstreamSelection
@@ -122,8 +129,10 @@ func (p Phase) String() string {
 	switch p {
 	case PhaseUnknown:
 		return "unknown"
-	case PhaseRequestReceived:
-		return "request_received"
+	case PhaseRouteMatched:
+		return "route_matched"
+	case PhaseRequestBuffering:
+		return "request_buffering"
 	case PhaseUpstreamSelection:
 		return "upstream_selection"
 	case PhaseBeforeUpstream:
@@ -165,9 +174,8 @@ const ReasonNoRoute RejectionReason = "no_route"
 
 // The rejection reasons of the core protections (ADR-0025).
 const (
-	// ReasonBodyTooLarge is the reason of a 413 rejection at the route match:
-	// the declared length or the bytes that were read are more than the body
-	// limit of the route, or the body limit already had an overflow. An
+	// ReasonBodyTooLarge is the reason of a 413 rejection after matching:
+	// the declared length is more than the fixed effective body limit. An
 	// overflow while the body streams is a [Failure] instead (see
 	// [ErrRequestBodyTooLarge]).
 	ReasonBodyTooLarge RejectionReason = "body_too_large"
@@ -175,15 +183,20 @@ const (
 	// ReasonAdmissionSaturated is the reason of a 503 rejection when an
 	// [AdmissionBudget] has no free slot.
 	ReasonAdmissionSaturated RejectionReason = "admission_saturated"
+
+	// ReasonRequestBufferSaturated is a 503 rejection when the shared byte
+	// budget cannot reserve the route's effective body limit.
+	ReasonRequestBufferSaturated RejectionReason = "request_buffer_saturated"
 )
 
 // completion reads the transport facts once, so all completion hooks get the
 // same snapshot.
 func (rc *RequestContext) completion(duration time.Duration, aborted bool) Completion {
+	routePrefix, _ := rc.RoutePrefix()
 	c := Completion{
 		Start:            rc.start,
 		Duration:         duration,
-		RoutePrefix:      rc.route,
+		RoutePrefix:      routePrefix,
 		SelectedUpstream: rc.upstream,
 		RejectionReason:  rc.rejection,
 		Failure:          rc.failure,

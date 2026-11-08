@@ -719,7 +719,7 @@ func TestEgressDeniesAddresses(t *testing.T) {
 		addr     netip.Addr
 	}{
 		{
-			name: "loopback outside a single-address network",
+			name: "loopback outside the network",
 			networks: []string{
 				"127.0.0.1/32",
 			},
@@ -755,7 +755,7 @@ func TestEgressDeniesAddresses(t *testing.T) {
 			addr: netip.MustParseAddr("8.8.8.8"),
 		},
 		{
-			name: "unique local address outside the network",
+			name: "unique local outside the network",
 			networks: []string{
 				"2001:db8::/32",
 			},
@@ -1586,8 +1586,8 @@ func TestEgressDenialIsAFailureAtCompletion(t *testing.T) {
 						Upstream: static(t, tc.upstream),
 					},
 				},
-				Transport:  transport,
-				Middleware: []edgekit.Middleware{unwinding(&unwound)},
+				Transport:        transport,
+				SharedMiddleware: []edgekit.Middleware{unwinding(&unwound)},
 				Hooks: edgekit.Hooks{
 					RequestCompleted: []edgekit.RequestCompletedHook{
 						edgekit.RequestCompletedHookFunc(func(ctx context.Context, rc *edgekit.RequestContext, c edgekit.Completion) {

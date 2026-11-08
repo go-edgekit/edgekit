@@ -11,7 +11,7 @@ import (
 
 // Rejection is a deliberate refusal of a request, such as a denial by a rate
 // limit. It is a decision, not a failure. A processing hook
-// ([RequestReceivedHook], [BeforeUpstreamHook], or [UpstreamResponseHook])
+// ([RouteMatchedHook], [BeforeUpstreamHook], or [UpstreamResponseHook])
 // returns it as its first result:
 //
 //	Rejection  error    Result

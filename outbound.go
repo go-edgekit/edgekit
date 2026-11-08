@@ -123,6 +123,8 @@ func (t *outboundTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	facts := &transportFacts{}
 	rc.facts = facts
 	traced := r.WithContext(httptrace.WithClientTrace(r.Context(), facts.clientTrace()))
+	// Replay is for request processing, not new transport retry permissions.
+	traced.GetBody = nil
 
 	resp, err := t.base.RoundTrip(traced)
 	if err != nil {
@@ -208,12 +210,15 @@ func (f *transportFacts) clientTrace() *httptrace.ClientTrace {
 }
 
 // sanitizeOutbound needs the values that connectionFields had before the
-// hooks, in the same order. It checks only the trailer names, because the
-// trailer values arrive while the body streams.
+// hooks, in the same order. It checks available trailer values too; client
+// values that arrive later remain protected by the inbound parser.
 func sanitizeOutbound(r *http.Request, saved *[len(connectionFields)][]string) error {
-	for name := range r.Trailer {
+	for name, values := range r.Trailer {
 		if !headerNameAllowed(name) {
 			return errInvalidOutboundName
+		}
+		if slices.ContainsFunc(values, invalidFieldValue) {
+			return errInvalidOutboundValue
 		}
 	}
 

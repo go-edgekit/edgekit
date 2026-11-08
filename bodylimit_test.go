@@ -62,7 +62,7 @@ type limitedRequest struct {
 	completions int
 	completion  edgekit.Completion
 
-	// unwoundFirst is true when the global middleware unwound before
+	// unwoundFirst is true when the shared middleware unwound before
 	// completion ran.
 	unwoundFirst bool
 
@@ -94,8 +94,8 @@ func sendWithBodyLimits(t *testing.T, gatewayLimit, routeLimit edgekit.BodyLimit
 				BodyLimit: routeLimit,
 			},
 		},
-		BodyLimit:  gatewayLimit,
-		Middleware: []edgekit.Middleware{unwinding(&unwound)},
+		BodyLimit:        gatewayLimit,
+		SharedMiddleware: []edgekit.Middleware{unwinding(&unwound)},
 		Hooks: edgekit.Hooks{
 			RequestCompleted: []edgekit.RequestCompletedHook{
 				edgekit.RequestCompletedHookFunc(func(_ context.Context, _ *edgekit.RequestContext, c edgekit.Completion) {
@@ -221,8 +221,8 @@ func TestDeclaredLengthOverLimitIsRejected(t *testing.T) {
 				t.Errorf("upstream got %d requests, RequestCompleted() SelectedUpstream = %v; want no selection and no upstream request", got.requests, c.SelectedUpstream)
 			}
 
-			if got.completions != 1 || !got.unwoundFirst || c.Aborted || c.RoutePrefix != "/api/" {
-				t.Errorf("RequestCompleted() ran %d times, after unwind %v, last with %+v; want one normal completion on /api/ after unwind", got.completions, got.unwoundFirst, c)
+			if got.completions != 1 || got.unwoundFirst || c.Aborted || c.RoutePrefix != "/api/" {
+				t.Errorf("RequestCompleted() ran %d times, middleware unwound %v, last with %+v; want one completion before processing middleware", got.completions, got.unwoundFirst, c)
 			}
 
 			if c.RejectionReason != edgekit.ReasonBodyTooLarge || c.Failure != nil {
@@ -253,7 +253,7 @@ func TestStreamingOverflowFailsTheRoundTrip(t *testing.T) {
 			limit:        0,
 		},
 		{
-			name:         "gateway disables the limit and route limits",
+			name:         "gateway disabled with route limits",
 			body:         "abcde",
 			gatewayLimit: edgekit.NoBodyLimit(),
 			routeLimit:   edgekit.MaxBodyBytes(4),
@@ -456,8 +456,8 @@ func TestInvalidBodyLimit(t *testing.T) {
 	}
 }
 
-// preReadRequest is what one request saw when the global middleware read a
-// part of the body before routing.
+// preReadRequest is what one request saw when the shared middleware read a
+// part of the body in shared processing.
 type preReadRequest struct {
 	recorder     *httptest.ResponseRecorder
 	completion   edgekit.Completion
@@ -470,8 +470,8 @@ type preReadRequest struct {
 }
 
 // sendAfterPreRead sends the 6-byte body "abcdef" without a declared length
-// through a gateway with the limits. The global middleware reads preRead
-// bytes before routing and ignores a read error.
+// through a gateway with the limits. Shared middleware reads preRead bytes
+// and ignores a read error, so the transport must still enforce overflow.
 func sendAfterPreRead(t *testing.T, gatewayLimit, routeLimit int64, preRead int) preReadRequest {
 	t.Helper()
 
@@ -500,7 +500,7 @@ func sendAfterPreRead(t *testing.T, gatewayLimit, routeLimit int64, preRead int)
 			},
 		},
 		BodyLimit: edgekit.MaxBodyBytes(gatewayLimit),
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			func(next http.Handler) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					_, _ = io.ReadFull(r.Body, make([]byte, preRead))
@@ -523,46 +523,54 @@ func sendAfterPreRead(t *testing.T, gatewayLimit, routeLimit int64, preRead int)
 	return got
 }
 
-func TestBodyOverLimitAtRouteMatchIsRejected(t *testing.T) {
+func TestSharedBodyReadsUseMatchedLimit(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		gatewayLimit int64
 		routeLimit   int64
 		preRead      int
+		wantStatus   int
+		wantOverflow bool
 	}{
 		{
-			name:         "bytes read before routing exceed the route limit",
+			name:         "smaller route limit",
 			gatewayLimit: 8,
 			routeLimit:   2,
 			preRead:      3,
+			wantStatus:   http.StatusRequestEntityTooLarge,
+			wantOverflow: true,
 		},
 		{
-			name:         "gateway overflow is final",
+			name:         "larger route limit",
 			gatewayLimit: 2,
 			routeLimit:   8,
 			preRead:      6,
+			wantStatus:   http.StatusOK,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := sendAfterPreRead(t, tc.gatewayLimit, tc.routeLimit, tc.preRead)
 			c := got.completion
 
-			if got.recorder.Code != http.StatusRequestEntityTooLarge {
-				t.Errorf("ServeHTTP() status = %d, want 413", got.recorder.Code)
+			if got.recorder.Code != tc.wantStatus {
+				t.Errorf("ServeHTTP() status = %d, want %d", got.recorder.Code, tc.wantStatus)
 			}
 
-			if got.routeReached || got.requests != 0 {
-				t.Errorf("route middleware reached = %v, upstream got %d requests; want neither", got.routeReached, got.requests)
+			if !got.routeReached {
+				t.Error("route middleware did not run after shared processing")
 			}
 
-			if c.RejectionReason != edgekit.ReasonBodyTooLarge || c.Failure != nil {
-				t.Errorf("RequestCompleted() = %+v, want the reason body_too_large and no failure", c)
+			if c.RejectionReason != "" || (c.Failure != nil) != tc.wantOverflow {
+				t.Errorf("RequestCompleted() = %+v, want overflow failure %v, no rejection", c, tc.wantOverflow)
+			}
+			if tc.wantOverflow && (c.Failure == nil || !errors.Is(c.Failure.Err, edgekit.ErrRequestBodyTooLarge)) {
+				t.Errorf("RequestCompleted() failure = %+v, want typed overflow", c.Failure)
 			}
 		})
 	}
 }
 
-func TestBodyReadBeforeRoutingCountsTowardRouteLimit(t *testing.T) {
+func TestSharedReadCountsTowardFixedRouteLimit(t *testing.T) {
 	const preRead, routeLimit = 3, 4
 	got := sendAfterPreRead(t, 8, routeLimit, preRead)
 	c := got.completion
@@ -584,7 +592,7 @@ func TestBodyReadBeforeRoutingCountsTowardRouteLimit(t *testing.T) {
 	}
 }
 
-func TestBodyReadBeforeRoutingWithinLimits(t *testing.T) {
+func TestSharedAndTransportReadsWithinFixedLimit(t *testing.T) {
 	const preRead = 3
 	got := sendAfterPreRead(t, 8, 8, preRead)
 	c := got.completion
@@ -691,7 +699,7 @@ func TestBodyOverflowStatusNeedsEvidence(t *testing.T) {
 			wantErr: edgekit.ErrRequestBodyTooLarge,
 		},
 		{
-			name: "sentinel from the transport without overflow",
+			name: "transport sentinel without overflow",
 			body: "abc",
 			fail: func(error) error {
 				return unrelated
@@ -728,7 +736,7 @@ func TestBodyOverflowStatusNeedsEvidence(t *testing.T) {
 			wantErr: edgekit.ErrRequestBodyTooLarge,
 		},
 		{
-			name: "sentinel from a response hook without overflow",
+			name: "response hook sentinel without overflow",
 			body: "abc",
 			response: func(error) error {
 				return unrelated

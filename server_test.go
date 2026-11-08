@@ -290,7 +290,7 @@ func apiGateway(t *testing.T, upstreamURL string, middleware []edgekit.Middlewar
 				Upstream: static(t, upstreamURL),
 			},
 		},
-		Middleware: middleware,
+		SharedMiddleware: middleware,
 		Hooks: edgekit.Hooks{
 			RequestCompleted: hooks,
 		},

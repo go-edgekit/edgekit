@@ -4,7 +4,7 @@ A bundled extension that makes one access-log record for each request. It uses o
 
 ## Registration
 
-Register one `Recorder` as global middleware, in its three hook phases, and as a header owner. Put tracing middleware outside it. In `BeforeUpstream`, put the recorder before hooks that read, change, or sign `X-Request-ID`; other hooks can get the ID with `Recorder.RequestID` at any position. Put the recorder last in `UpstreamResponse` and `RequestCompleted`. Each list runs in its written order ([ADR-0030](../../docs/adr/0030-typed-hook-phase-lists.md)):
+Register one `Recorder` as shared middleware, in its three hook phases, and as a header owner. Put tracing middleware outside it. In `BeforeUpstream`, put the recorder before hooks that read, change, or sign `X-Request-ID`; other hooks can get the ID with `Recorder.RequestID` at any position. Put the recorder last in `UpstreamResponse` and `RequestCompleted`. Each list runs in its written order ([ADR-0030](../../docs/adr/0030-typed-hook-phase-lists.md)):
 
 ```go
 recorder, err := accesslog.New(accesslog.Config{
@@ -16,7 +16,7 @@ if err != nil {
 }
 
 gateway, err := edgekit.New(edgekit.Config{
-    Middleware: []edgekit.Middleware{tracing, recorder.Middleware},
+    SharedMiddleware: []edgekit.Middleware{tracing, recorder.Middleware},
     Hooks: edgekit.Hooks{
         BeforeUpstream: []edgekit.BeforeUpstreamHook{
             recorder,
@@ -60,7 +60,7 @@ Sensitive: `Method`, `Path`, `TraceID`, `WriteErr`, `Completion.Failure.Err`, `C
 
 `Record` implements `slog.LogValuer`: `slog.Info("request", slog.Any("record", r))` writes only the safe fields. A sink that needs a sensitive field must select it and apply its own policy. The [example program](../../examples/gateway) writes only numbers, booleans, and values from allowlists.
 
-When the middleware did not handle a request, for example a rejection by the secure defaults, the record has `Observed == false` and only `Completion`. It has no status, because completion does not get the status of such a rejection. Outside a gateway, the middleware calls the next handler without changes and records nothing.
+When the middleware did not handle a request, for example a rejection by the secure defaults, a route miss, admission saturation, or an early body-size or buffering failure, the record has `Observed == false` and only `Completion`. It has no status or generated request ID, because processing middleware did not run and completion does not supply those observations ([ADR-0031](../../docs/adr/0031-route-first-request-bodies.md)). Outside a gateway, the middleware calls the next handler without changes and records nothing.
 
 ## Sink rules
 

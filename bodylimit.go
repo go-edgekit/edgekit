@@ -35,19 +35,19 @@ const (
 const noBodyLimit int64 = -1
 
 // BodyLimit is the request-body limit of a gateway or a route. It is a secure
-// default (ADR-0025). The zero value means that the limit is omitted: for
-// [Config.BodyLimit], the gateway uses [DefaultBodyLimit]; for
+// default (ADR-0025, ADR-0031). The zero value means that the limit is
+// omitted: for [Config.BodyLimit], the gateway uses [DefaultBodyLimit]; for
 // [Route.BodyLimit], the route uses the limit of the gateway. Make other
 // values with [MaxBodyBytes] and [NoBodyLimit].
 //
-// The limit applies to the bytes that readers get from the body. The gateway
-// does not buffer the body and does not read ahead. Before routing, the
-// gateway limit applies. At the route match, the route limit replaces it, and
-// the bytes that were read before still count. Then, before the route
-// middleware, the gateway rejects the request with 413 Content Too Large
-// (RFC 9110, section 15.5.14) and [ReasonBodyTooLarge] when the declared length or the bytes that
-// were read are more than the route limit, or when the limit already had an
-// overflow. An overflow is final: a larger route limit cannot undo it.
+// The gateway selects one effective limit after matching and before any body
+// reader. It rejects an excessive declared length with 413 and
+// [ReasonBodyTooLarge] (RFC 9110, section 15.5.14). The limit never changes.
+// It counts bytes exposed by the inbound HTTP body reader, excluding transfer
+// framing. It does not decompress, bound server cleanup reads or network
+// bytes, or bound middleware-generated bodies. Generated or decompressed
+// output needs its own bounds. Streaming is the default, without read-ahead;
+// [Route.RequestBuffering] explicitly enables complete bounded buffering.
 //
 // A reader that reads more than the limit gets an error that wraps
 // [ErrRequestBodyTooLarge]. When the transport fails with this error, the
@@ -97,17 +97,6 @@ func (l BodyLimit) resolve(fallback int64) int64 {
 	default:
 		return fallback
 	}
-}
-
-// admitBody applies the route limit at the route match. It reports false
-// when the declared length or the bytes that were read are more than the
-// limit, or when the body limit already had an overflow.
-func (rc *RequestContext) admitBody(r *http.Request, limit int64) bool {
-	if !rc.body.setLimit(limit) {
-		return false
-	}
-
-	return limit == noBodyLimit || r.ContentLength <= limit
 }
 
 // tooLarge wraps ErrRequestBodyTooLarge and the error of

@@ -61,7 +61,7 @@ func benchmarkServeHTTP(b *testing.B, recorder *accesslog.Recorder) {
 		Transport: transport,
 	}
 	if recorder != nil {
-		cfg.Middleware = []edgekit.Middleware{
+		cfg.SharedMiddleware = []edgekit.Middleware{
 			recorder.Middleware,
 		}
 		cfg.Hooks = edgekit.Hooks{

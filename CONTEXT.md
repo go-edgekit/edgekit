@@ -20,7 +20,7 @@ A protection the core provides but leaves off until configured, because a safe v
 _Avoid_: Optional extension (it is core, not an extension)
 
 **Body limit**:
-A secure default that limits the bytes that readers get from a request body, for the gateway and for each route. It streams and does not buffer, so it is not an atomic rejection.
+A secure default that limits bytes exposed by the inbound request-body reader. The matched route determines the effective value; streaming enforcement does not promise complete rejection before forwarding.
 _Avoid_: Upload limit, payload size (they suggest a check of the complete body)
 
 **Admission budget**:
@@ -41,12 +41,27 @@ A place where the core lets outside code take part in handling: middleware, life
 **Middleware**:
 An extension point that wraps HTTP handling and may end it early.
 
+**Shared middleware**:
+Request-processing middleware shared across matched routes. It runs after route protection selection and any configured request buffering, not before routing.
+
+**Matched route**:
+The fixed route selected from the original validated routing inputs. Later outbound changes do not change that execution fact or its protections.
+
+**Request buffering**:
+Complete retention of an inbound body before request-processing middleware and normal forwarding. It is explicit and bounded, unlike the default streaming handling.
+
+**Request replay**:
+Another reading of the same accepted buffered content during request handling. Replay is not permission to retry an upstream exchange.
+
+**Buffer reservation**:
+Stored-body capacity held for a buffered request: its declared length, or the effective body limit when the length is unknown. A request without a body holds none. It is not actual memory use or a complete process-memory bound.
+
 **Lifecycle hook**:
 An extension point that runs at a named phase of proxy execution with access to proxy-specific state.
 _Avoid_: Plugin, event handler
 
 **Processing hook**:
-A lifecycle hook that takes part in handling before completion: when the request is received, before the upstream, or at the upstream response. A completion hook only observes.
+A lifecycle hook that takes part in handling before completion: after route protection and admission checks, before the upstream, or at the upstream response. A completion hook only observes.
 _Avoid_: Filter
 
 **Hook provider**:

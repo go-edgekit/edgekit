@@ -53,7 +53,7 @@ func ExampleNew() {
 	// The recorder observes the inner middleware and registers each hook
 	// phase and its managed headers separately.
 	gateway, err := edgekit.New(edgekit.Config{
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			recorder.Middleware,
 		},
 		Hooks: edgekit.Hooks{
@@ -94,9 +94,9 @@ func ExampleNew() {
 	// status: 201 upstream status: 201 bytes: 7
 	// route matched: true, reason: ""
 	// request ID sent: true
-	// status: 404 upstream status: 0 bytes: 75
+	// status: 0 upstream status: 0 bytes: 0
 	// route matched: false, reason: "no_route"
-	// request ID sent: true
+	// request ID sent: false
 }
 
 func ExampleRecord_LogValue() {
@@ -127,7 +127,7 @@ func ExampleRecord_LogValue() {
 	}
 
 	gateway, err := edgekit.New(edgekit.Config{
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			recorder.Middleware,
 		},
 		Hooks: edgekit.Hooks{
@@ -176,7 +176,7 @@ func ExampleRecord_LogValue() {
 	fmt.Println("path logged:", pathLogged)
 
 	// Output:
-	// status: 404
+	// status: 0
 	// rejection reason: no_route
 	// path logged: false
 }
@@ -223,7 +223,7 @@ func ExampleSink() {
 	}
 
 	gateway, err := edgekit.New(edgekit.Config{
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			recorder.Middleware,
 		},
 		Hooks: edgekit.Hooks{
@@ -274,6 +274,6 @@ func ExampleSink() {
 	fmt.Println("dropped:", sink.dropped.Load())
 
 	// Output:
-	// exported: 404 no_route
+	// exported: 0 no_route
 	// dropped: 1
 }

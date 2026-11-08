@@ -426,12 +426,6 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	s.enter()
 	defer s.leave()
 
-	if s.transferIdle == 0 {
-		s.gateway.ServeHTTP(w, r)
-
-		return
-	}
-
 	http1 := r.ProtoMajor == 1
 	noBody := r.Body == nil || r.Body == http.NoBody
 	t := &transfer{

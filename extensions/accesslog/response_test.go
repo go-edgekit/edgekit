@@ -157,7 +157,7 @@ func writerWith(base *plainWriter, c *capabilities, caps writerCaps) http.Respon
 	}
 }
 
-// inspectingGateway returns a gateway whose global middleware after the
+// inspectingGateway returns a gateway whose shared middleware after the
 // recorder runs inspect instead of the gateway handling.
 func inspectingGateway(t *testing.T, sink accesslog.Sink, inspect http.HandlerFunc) *edgekit.Gateway {
 	t.Helper()
@@ -167,7 +167,7 @@ func inspectingGateway(t *testing.T, sink accesslog.Sink, inspect http.HandlerFu
 	})
 
 	return newGateway(t, edgekit.Config{
-		Middleware: []edgekit.Middleware{
+		SharedMiddleware: []edgekit.Middleware{
 			recorder.Middleware,
 			func(http.Handler) http.Handler {
 				return inspect
@@ -440,7 +440,7 @@ func TestResponseStatusesAndRequestID(t *testing.T) {
 				Sink: sink,
 			})
 			g := newGateway(t, edgekit.Config{
-				Middleware: []edgekit.Middleware{
+				SharedMiddleware: []edgekit.Middleware{
 					recorder.Middleware,
 				},
 				Hooks: edgekit.Hooks{
@@ -666,7 +666,7 @@ func TestUpstreamRequestIDDoesNotReachClient(t *testing.T) {
 					Sink: sink,
 				})
 				g := newGateway(t, edgekit.Config{
-					Middleware: []edgekit.Middleware{
+					SharedMiddleware: []edgekit.Middleware{
 						recorder.Middleware,
 					},
 					Hooks: edgekit.Hooks{

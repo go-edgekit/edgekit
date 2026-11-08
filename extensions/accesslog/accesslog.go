@@ -10,13 +10,13 @@
 //
 // # Registration
 //
-// Register the same [Recorder] as global middleware, in each phase that it
+// Register the same [Recorder] as shared middleware, in each phase that it
 // implements, and as a header owner:
 //
 //	recorder, err := accesslog.New(accesslog.Config{Sink: sink})
 //	// ...
 //	gateway, err := edgekit.New(edgekit.Config{
-//		Middleware: []edgekit.Middleware{tracing, recorder.Middleware},
+//		SharedMiddleware: []edgekit.Middleware{tracing, recorder.Middleware},
 //		Hooks: edgekit.Hooks{
 //			BeforeUpstream: []edgekit.BeforeUpstreamHook{
 //				recorder,
@@ -66,7 +66,8 @@
 //
 // The recorder reports one [Record] for each request, at completion, also
 // for a request that its middleware did not handle, such as a rejection by
-// the secure defaults (ADR-0018). Such a record has only the execution facts
+// the secure defaults, a route miss, admission, or an early body rejection
+// (ADR-0031). Such a record has only the execution facts
 // (see [Record.Observed]).
 //
 // A Record contains sensitive fields. Log a Record as a value of
@@ -210,7 +211,9 @@ func isNilSink(sink Sink) bool {
 }
 
 // Middleware observes the request and the response. It is an
-// [edgekit.Middleware]. Register it as the first global middleware.
+// [edgekit.Middleware]. Register it as shared middleware outside the
+// processing middleware whose responses it must observe. Earlier routing,
+// admission, and buffering outcomes have completion facts only.
 //
 // In a gateway, it makes a request ID, sets [RequestIDHeader] in the
 // response headers, calls [Config.TraceID], and gives the next handler a

@@ -16,7 +16,7 @@ Slices:
 
 0. Groundwork: tag, ledger, and the rewrite rule in AGENTS.md. Done.
 1. Proxy core: routing, the upstream-selector extension point with static selection, forwarding, managed and hop-by-hop headers, transport, and cancellation. Also the request secure defaults: rejection of opaque-form, absolute-form, and asterisk-form targets and `CONNECT`, the path policy in reject mode (R1), query-semicolon rejection (R2), header-name rejection (R3), and `Alt-Svc` removal (R7). Done.
-   - 1b. Path and query rewriting on routes, and the path policy in normalize mode.
+   - 1b. Declarative path and query rewriting on routes, and the path policy in normalize mode. Middleware can already make checked outbound rewrites after fixed matching (ADR-0031); these do not select another route.
 2. Lifecycle hooks and request state, including typed phase lists in `Config.Hooks` and separate header-owner declarations ([ADR-0030](adr/0030-typed-hook-phase-lists.md)). Also completion of gateway-owned rejections, failure statuses by source, and the header rules after hooks ([ADR-0017](adr/0017-failure-status-by-source.md) to [ADR-0020](adr/0020-route-prefix-matching-without-redirects.md)). Done.
 3. Typed rejections, the replaceable renderer, and typed failures (R10) ([ADR-0022](adr/0022-rejections-and-the-problem-response.md), [ADR-0023](adr/0023-failure-evidence-and-transport-facts.md)). Done.
    - The failures that `ReverseProxy` reported as `PhaseUnknown` have a source or a stage: a client `Upgrade` value that is not printable is a secure-default rejection with 400, a 101 body that cannot be written and a writer that cannot hijack are embedder defects with 500, and an upstream that does not accept the protocol switch is a failure in `PhaseProtocolSwitch` with 502.
@@ -33,6 +33,7 @@ Slices:
    - The access log covers the sink part of section 4: a `Sink` interface that is called synchronously at completion. Exporters, bounded asynchronous sinks, sampling, and metrics stay in section 4.
    - Outbound signing is a demonstration, not a supported security extension: it has no timestamp, replay protection, body integrity, or key identifier. Its key comes from route middleware through request state, as in the prototype. This does not decide the open experiment of section 3.
    - A signing failure is 500 (a hook failure, ADR-0017), or 499 when the client is gone (ADR-0023), not the 502 of the prototype.
+7. Route-first request-body processing ([ADR-0031](adr/0031-route-first-request-bodies.md)): `Config.SharedMiddleware` after matching and body protection; restricted `RouteMatchedHook` checks after admission and before buffering; one fixed effective body limit; explicit memory-only request buffering with shared byte reservations, request-scoped replay, and scoped idle/total deadlines. No automatic rematching, new transport replay retries, disk spill, or compatibility pipeline. Done.
    - The rewrite is not finished: slice 1b and the typed dial failure of `NewTransport` are open, so the ledger and its rule stay.
 
 The rewrite is done when every slice of this roadmap is done, every ledger row is covered or dropped, the ledger and its AGENTS.md rule are deleted, no document calls the code a prototype, and `just check` passes. The Go API stays provisional until v1.

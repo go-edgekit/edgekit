@@ -55,7 +55,7 @@ func TestDefaultProblemResponse(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			hooks := edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			hooks := edgekit.RouteMatchedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 				return tc.rejection, tc.err
 			})
 
@@ -76,9 +76,9 @@ func TestDefaultProblemResponse(t *testing.T) {
 						Upstream: static(t, "http://unused.test"),
 					},
 				},
-				Middleware: []edgekit.Middleware{middleware},
+				SharedMiddleware: []edgekit.Middleware{middleware},
 				Hooks: edgekit.Hooks{
-					RequestReceived: []edgekit.RequestReceivedHook{
+					RouteMatched: []edgekit.RouteMatchedHook{
 						hooks,
 					},
 				},
@@ -168,8 +168,8 @@ func TestProblemResponseOwnsContentTypeOptions(t *testing.T) {
 								Upstream: static(t, "http://unused.test"),
 							},
 						},
-						Middleware: []edgekit.Middleware{middleware},
-						Renderer:   tc.renderer,
+						SharedMiddleware: []edgekit.Middleware{middleware},
+						Renderer:         tc.renderer,
 					})
 					server := httptest.NewUnstartedServer(g)
 					server.EnableHTTP2 = protocol.http2
@@ -248,10 +248,11 @@ func TestCustomRendererForEverySource(t *testing.T) {
 			hasContext: true,
 		},
 		{
-			name:      "request received rejection",
+			name:      "route matched rejection",
 			target:    "/api/x",
-			hookPhase: edgekit.PhaseRequestReceived,
+			hookPhase: edgekit.PhaseRouteMatched,
 			rejection: &limited,
+			route:     true,
 			problem: edgekit.Problem{
 				Status: http.StatusTooManyRequests,
 				Reason: "ratelimit.exceeded",
@@ -259,15 +260,16 @@ func TestCustomRendererForEverySource(t *testing.T) {
 			hasContext: true,
 		},
 		{
-			name:      "request received failure",
+			name:      "route matched failure",
 			target:    "/api/x",
-			hookPhase: edgekit.PhaseRequestReceived,
+			hookPhase: edgekit.PhaseRouteMatched,
 			hookErr:   errors.New("secret"),
 			problem: edgekit.Problem{
 				Status: http.StatusInternalServerError,
 			},
-			failurePhase: edgekit.PhaseRequestReceived,
+			failurePhase: edgekit.PhaseRouteMatched,
 			hasContext:   true,
+			route:        true,
 		},
 		{
 			name:      "before upstream rejection",
@@ -427,8 +429,8 @@ func TestCustomRendererForEverySource(t *testing.T) {
 				},
 			}
 			switch tc.hookPhase {
-			case edgekit.PhaseRequestReceived:
-				phaseHooks.RequestReceived = append(phaseHooks.RequestReceived, edgekit.RequestReceivedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
+			case edgekit.PhaseRouteMatched:
+				phaseHooks.RouteMatched = append(phaseHooks.RouteMatched, edgekit.RouteMatchedHookFunc(func(context.Context, *edgekit.RequestContext, *http.Request) (*edgekit.Rejection, error) {
 					return tc.rejection, tc.hookErr
 				}))
 			case edgekit.PhaseBeforeUpstream:
@@ -507,10 +509,10 @@ func TestCustomRendererForEverySource(t *testing.T) {
 						Upstream: selector,
 					},
 				},
-				Middleware: []edgekit.Middleware{lose},
-				Hooks:      phaseHooks,
-				Transport:  transport,
-				Renderer:   renderer,
+				SharedMiddleware: []edgekit.Middleware{lose},
+				Hooks:            phaseHooks,
+				Transport:        transport,
+				Renderer:         renderer,
 			})
 
 			r := httptest.NewRequest(http.MethodGet, tc.target, nil).WithContext(t.Context())

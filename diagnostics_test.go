@@ -93,7 +93,7 @@ func TestStreamFailureDiagnosticOmitsDetails(t *testing.T) {
 				Request:    r,
 			}, nil
 		}),
-		Middleware: []edgekit.Middleware{unwinding(&unwound)},
+		SharedMiddleware: []edgekit.Middleware{unwinding(&unwound)},
 		Hooks: edgekit.Hooks{
 			RequestCompleted: []edgekit.RequestCompletedHook{
 				completionHooks,
