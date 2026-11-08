@@ -6,6 +6,8 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -18,6 +20,48 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 // RoundTrip calls f.
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
+}
+
+// The benchmarks in this file run the same request cases without network
+// I/O, so the difference between two of them is the work of one layer:
+//
+//   - BenchmarkHandler: an http.Handler that writes the response itself, the
+//     cost of the harness.
+//   - BenchmarkReverseProxy: httputil.ReverseProxy with the same forwarding
+//     as the gateway, the cost of the standard proxy.
+//   - BenchmarkServeHTTP: the gateway, so the difference to
+//     BenchmarkReverseProxy is the work of edgekit.
+//   - BenchmarkServeHTTPHooks: the gateway with hooks in all four phases.
+//
+// Compare them only with results of the same machine and Go version.
+
+// BenchmarkHandler measures an http.Handler that writes the response of the
+// test transport itself, so the result is the cost of the harness: the
+// request cases, the response recorder, and the loop.
+func BenchmarkHandler(b *testing.B) {
+	runBenchmarkCases(b, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "ok")
+	}))
+}
+
+// BenchmarkReverseProxy measures httputil.ReverseProxy with the test
+// transport. Its Rewrite does the forwarding of the gateway, SetURL and
+// SetXForwarded, and nothing more: no routing, no secure defaults, no header
+// rules, and no completion.
+func BenchmarkReverseProxy(b *testing.B) {
+	target, err := url.Parse("http://upstream.test")
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	runBenchmarkCases(b, &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(target)
+			pr.SetXForwarded()
+		},
+		Transport: benchmarkTransport(),
+	})
 }
 
 // BenchmarkServeHTTP measures the gateway without network I/O, so the
@@ -45,11 +89,10 @@ func BenchmarkServeHTTPHooks(b *testing.B) {
 	benchmarkServeHTTP(b, allPhases(hook))
 }
 
-// benchmarkServeHTTP runs the sub-benchmarks for a gateway with hooks.
-func benchmarkServeHTTP(b *testing.B, hooks edgekit.Hooks) {
-	b.Helper()
-
-	transport := roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+// benchmarkTransport returns a transport that answers 200 "ok" without
+// network I/O.
+func benchmarkTransport() http.RoundTripper {
+	return roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     make(http.Header),
@@ -57,6 +100,12 @@ func benchmarkServeHTTP(b *testing.B, hooks edgekit.Hooks) {
 			Request:    r,
 		}, nil
 	})
+}
+
+// benchmarkServeHTTP runs the request cases for a gateway with hooks.
+func benchmarkServeHTTP(b *testing.B, hooks edgekit.Hooks) {
+	b.Helper()
+
 	g, err := edgekit.New(edgekit.Config{
 		Routes: []edgekit.Route{
 			{
@@ -65,11 +114,19 @@ func benchmarkServeHTTP(b *testing.B, hooks edgekit.Hooks) {
 			},
 		},
 		Hooks:     hooks,
-		Transport: transport,
+		Transport: benchmarkTransport(),
 	})
 	if err != nil {
 		b.Fatal(err)
 	}
+
+	runBenchmarkCases(b, g)
+}
+
+// runBenchmarkCases runs the request cases as sub-benchmarks of h, so all
+// benchmarks of this file measure the same requests.
+func runBenchmarkCases(b *testing.B, h http.Handler) {
+	b.Helper()
 
 	// browserHeaders is a typical set of request headers, so the work per
 	// header is visible.
@@ -109,7 +166,7 @@ func benchmarkServeHTTP(b *testing.B, hooks edgekit.Hooks) {
 			maps.Copy(r.Header, bc.header)
 
 			for b.Loop() {
-				g.ServeHTTP(httptest.NewRecorder(), r)
+				h.ServeHTTP(httptest.NewRecorder(), r)
 			}
 		})
 	}
