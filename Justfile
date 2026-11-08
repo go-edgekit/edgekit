@@ -4,7 +4,7 @@ default:
   @just --list
 
 # Run all checks that CI runs.
-check: lint actionlint zizmor test race vet tidy-check
+check: lint actionlint zizmor test race bench-smoke vet tidy-check
 
 fmt:
   golangci-lint fmt
@@ -17,6 +17,11 @@ test pattern="":
 
 race:
   go test -race ./...
+
+# Run each benchmark one time, so a broken benchmark fails the check. This
+# measures nothing.
+bench-smoke:
+  go test -run '^$' -bench . -benchtime=1x ./...
 
 vet:
   go vet ./...
