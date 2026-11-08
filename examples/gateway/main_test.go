@@ -636,12 +636,14 @@ func (b *syncBuffer) snapshot() *bytes.Buffer {
 	return bytes.NewBuffer(bytes.Clone(b.buf.Bytes()))
 }
 
-func TestRunSignsAndLogsRequests(t *testing.T) {
+func TestRunSignsLogsAndReplacesClientManagedHeaders(t *testing.T) {
 	signatures := make(chan bool, 1)
+	requestIDs := make(chan []string, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mac := hmac.New(sha256.New, testKey)
 		_, _ = io.WriteString(mac, r.Method+"\nhttp\n"+r.Host+"\n"+r.Host+"\n"+r.RequestURI)
 		signatures <- r.Header.Get(outboundsign.SignatureHeader) == hex.EncodeToString(mac.Sum(nil))
+		requestIDs <- slices.Clone(r.Header.Values(accesslog.RequestIDHeader))
 
 		w.WriteHeader(http.StatusAccepted)
 	}))
@@ -678,7 +680,14 @@ func TestRunSignsAndLogsRequests(t *testing.T) {
 	client := &http.Client{
 		Timeout: 5 * time.Second,
 	}
-	resp, err := client.Get("http://" + addr.String() + "/api/items?token=query-secret")
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr.String()+"/api/items?token=query-secret", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set(accesslog.RequestIDHeader, "client-id-secret")
+	req.Header.Set(outboundsign.SignatureHeader, "client-signature-secret")
+	req.Header.Set("Connection", accesslog.RequestIDHeader+", "+outboundsign.SignatureHeader)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -695,6 +704,19 @@ func TestRunSignsAndLogsRequests(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("upstream got no request")
+	}
+
+	select {
+	case ids := <-requestIDs:
+		id := resp.Header.Get(accesslog.RequestIDHeader)
+		if safeRequestID(id) != id {
+			t.Errorf("response request ID = %q, want 32 lowercase hexadecimal digits", id)
+		}
+		if !slices.Equal(ids, []string{id}) {
+			t.Errorf("upstream request IDs = %q, want only the response ID %q", ids, id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream reported no request ID")
 	}
 
 	cancel()

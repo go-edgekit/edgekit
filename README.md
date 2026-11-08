@@ -76,7 +76,7 @@ The extension points are:
 - **Upstream selector:** chooses the upstream URL for a matched request. `StaticUpstream` is the default. `UpstreamSelectorFunc` makes a selector from a function.
 - **Transport:** an `http.RoundTripper`. `NewTransport` gives the transport with the secure defaults. `NewEgressTransport` gives a transport that connects only to allowed origins and IP networks.
 
-A hook runs only in the phase lists that contain it. Register managed-header declarations separately in `Config.HeaderOwners []HeaderOwner`, or list the names directly in `Config.ManagedHeaders`. Hook registration alone does not declare headers ([ADR-0030](docs/adr/0030-typed-hook-phase-lists.md)).
+A hook runs only in the phase lists that contain it. Register managed-header declarations separately in `Config.HeaderOwners []HeaderOwner`, or list the names directly in `Config.ManagedHeaders`. Hook registration alone does not declare headers ([ADR-0030](docs/adr/0030-typed-hook-phase-lists.md)). Declare middleware-owned request headers too: without a declaration, client values can reach middleware, and client `Connection` options can remove headers that middleware sets before forwarding.
 
 ## Bundled extensions
 

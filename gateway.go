@@ -322,7 +322,9 @@ type Route struct {
 // X-Forwarded-Host, and X-Forwarded-Proto from the direct peer. It does not
 // trust forwarding headers from other proxies. It also removes the names of
 // these headers from the inbound Connection header, so a client cannot make
-// the proxy remove a header that middleware set.
+// the proxy remove one of these headers after middleware set it. Other
+// middleware-owned headers need a declaration in [Config.ManagedHeaders] or
+// [Config.HeaderOwners] for the same protection.
 //
 // The gateway removes hop-by-hop headers in both directions. It removes
 // Alt-Svc and hop-by-hop fields from responses, informational (1xx) responses,
