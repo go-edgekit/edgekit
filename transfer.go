@@ -49,9 +49,9 @@ type transfer struct {
 	// Then net/http does not read the unread body before a write.
 	fullDuplex bool
 
-	// expectContinue is true until the first read of a request body with
-	// "Expect: 100-continue" on HTTP/1.1. That read makes net/http write
-	// "100 Continue".
+	// expectContinue is true until the first read of an HTTP/1.1 request body
+	// with a 100-continue expectation that net/http accepts (see
+	// hasContinueExpectation). That read makes net/http write "100 Continue".
 	expectContinue bool
 
 	// bodyDone is true when the request body has no unread data that

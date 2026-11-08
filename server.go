@@ -433,7 +433,7 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		idle:           s.transferIdle,
 		http1:          http1,
 		bodyDone:       noBody,
-		expectContinue: http1 && !noBody && strings.EqualFold(r.Header.Get("Expect"), "100-continue"),
+		expectContinue: http1 && !noBody && hasContinueExpectation(r.Header.Get("Expect")),
 	}
 	defer t.finish()
 
@@ -458,6 +458,26 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.gateway.ServeHTTP(newTransferWriter(w, t), inner)
+}
+
+// hasContinueExpectation reports whether net/http writes an automatic 100
+// Continue response for the first Expect value, so that every such write gets
+// the transfer deadline protection. It must agree with hasToken in
+// net/http/header.go: ASCII space, tab, and comma separate tokens, and the
+// comparison ignores ASCII case. Check it again when the Go version changes.
+func hasContinueExpectation(value string) bool {
+	for token := range strings.FieldsFuncSeq(value, func(c rune) bool {
+		return c == ' ' || c == '\t' || c == ','
+	}) {
+		// strings.EqualFold is exact here: no non-ASCII rune folds to a letter
+		// of "100-continue", so it agrees with the ASCII comparison of
+		// net/http.
+		if strings.EqualFold(token, "100-continue") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // enter counts a handler call.

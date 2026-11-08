@@ -215,25 +215,33 @@ func TestBufferedExpectContinue(t *testing.T) {
 	ts := startServer(t, g, edgekit.ServerConfig{}, serverOptions{})
 	client := ts.client(t, false)
 	client.Transport.(*http.Transport).ExpectContinueTimeout = time.Second
-	var continued atomic.Int32
-	trace := &httptrace.ClientTrace{
-		Got100Continue: func() { continued.Add(1) },
-	}
-	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(t.Context(), trace), http.MethodPost, ts.url()+"/api/upload", strings.NewReader("body"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Expect", "100-continue")
-	resp, err := client.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		t.Errorf("POST /api/upload with Expect: 100-continue: status = %d, want %d", resp.StatusCode, http.StatusNoContent)
-	}
-	if got := continued.Load(); got != 1 {
-		t.Errorf("POST /api/upload with Expect: 100-continue: 100 Continue responses = %d, want 1", got)
+	for _, expect := range []string{
+		"100-continue",
+		"100-continue, foo",
+		"foo, 100-CoNtInUe",
+	} {
+		t.Run(expect, func(t *testing.T) {
+			var continued atomic.Int32
+			trace := &httptrace.ClientTrace{
+				Got100Continue: func() { continued.Add(1) },
+			}
+			req, err := http.NewRequestWithContext(httptrace.WithClientTrace(t.Context(), trace), http.MethodPost, ts.url()+"/api/upload", strings.NewReader("body"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Expect", expect)
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusNoContent {
+				t.Errorf("POST /api/upload with Expect %q: status = %d, want %d", expect, resp.StatusCode, http.StatusNoContent)
+			}
+			if got := continued.Load(); got != 1 {
+				t.Errorf("POST /api/upload with Expect %q: 100 Continue responses = %d, want 1", expect, got)
+			}
+		})
 	}
 }
 
